@@ -1,0 +1,211 @@
+/* frontend/styles.css */
+
+/* Fundo Geral e Fontes */
+QWidget {
+    background-color: #0f172a;
+    color: #f8fafc;
+    font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, Roboto, Helvetica, Arial, sans-serif;
+    font-size: 13px;
+}
+
+/* Painéis Secundários (Cards) */
+QFrame#cardFrame {
+    background-color: #1e293b;
+    border: 1px solid #334155;
+    border-radius: 8px;
+}
+
+/* Títulos */
+QLabel#titleLabel {
+    font-size: 20px;
+    font-weight: bold;
+    color: #f8fafc;
+    padding-bottom: 5px;
+}
+
+QLabel#subtitleLabel {
+    font-size: 12px;
+    color: #94a3b8;
+}
+
+/* Campos de Entrada (Inputs) */
+QLineEdit, QDateEdit, QComboBox, QSpinBox, QPlainTextEdit {
+    background-color: #1e293b;
+    border: 1px solid #475569;
+    border-radius: 6px;
+    padding: 8px 12px;
+    color: #f8fafc;
+}
+
+QLineEdit:focus, QDateEdit:focus, QComboBox:focus, QSpinBox:focus, QPlainTextEdit:focus {
+    border: 1px solid #3b82f6;
+    background-color: #0f172a;
+}
+
+QComboBox::drop-down {
+    border: none;
+    padding-right: 10px;
+}
+
+/* Botões Customizados */
+QPushButton {
+    background-color: #3b82f6;
+    color: #ffffff;
+    font-weight: bold;
+    border: none;
+    border-radius: 6px;
+    padding: 10px 20px;
+}
+
+QPushButton:hover {
+    background-color: #2563eb;
+}
+
+QPushButton:pressed {
+    background-color: #1d4ed8;
+}
+
+/* Botão de Destaque Verde (Iniciar/Sucesso) */
+QPushButton#successButton {
+    background-color: #10b981;
+    color: #ffffff;
+}
+
+QPushButton#successButton:hover {
+    background-color: #059669;
+}
+
+QPushButton#successButton:pressed {
+    background-color: #047857;
+}
+
+/* Botão de Perigo/Parar */
+QPushButton#dangerButton {
+    background-color: #ef4444;
+    color: #ffffff;
+}
+
+QPushButton#dangerButton:hover {
+    background-color: #dc2626;
+}
+
+QPushButton#dangerButton:pressed {
+    background-color: #b91c1c;
+}
+
+/* Botão Secundário Transparente */
+QPushButton#secondaryButton {
+    background-color: transparent;
+    border: 1px solid #475569;
+    color: #f8fafc;
+}
+
+QPushButton#secondaryButton:hover {
+    background-color: #334155;
+    border: 1px solid #64748b;
+}
+
+/* Controle de Abas (QTabWidget) */
+QTabWidget::pane {
+    border: 1px solid #334155;
+    background-color: #0f172a;
+    border-radius: 8px;
+    top: -1px;
+}
+
+QTabBar::tab {
+    background-color: #1e293b;
+    border: 1px solid #334155;
+    border-bottom: none;
+    border-top-left-radius: 6px;
+    border-top-right-radius: 6px;
+    padding: 10px 20px;
+    color: #94a3b8;
+    font-weight: bold;
+}
+
+QTabBar::tab:hover {
+    background-color: #334155;
+    color: #f8fafc;
+}
+
+QTabBar::tab:selected {
+    background-color: #0f172a;
+    border-color: #334155;
+    color: #10b981;  /* Emerald Green para a aba selecionada */
+    border-bottom: 2px solid #10b981;
+}
+
+/* Tabela de Resultados (QTableWidget) */
+QTableWidget {
+    background-color: #1e293b;
+    border: 1px solid #334155;
+    gridline-color: #334155;
+    border-radius: 6px;
+}
+
+QTableWidget::item {
+    padding: 8px;
+    border-bottom: 1px solid #334155;
+}
+
+QTableWidget::item:selected {
+    background-color: #334155;
+    color: #10b981;
+}
+
+QHeaderView::section {
+    background-color: #0f172a;
+    color: #94a3b8;
+    padding: 8px;
+    font-weight: bold;
+    border: none;
+    border-bottom: 2px solid #334155;
+}
+
+/* Barras de Rolagem (QScrollBar) */
+QScrollBar:vertical {
+    border: none;
+    background: #0f172a;
+    width: 10px;
+    margin: 0px;
+}
+
+QScrollBar::handle:vertical {
+    background: #475569;
+    min-height: 20px;
+    border-radius: 5px;
+}
+
+QScrollBar::handle:vertical:hover {
+    background: #64748b;
+}
+
+QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
+    height: 0px;
+}
+
+/* Console de Logs Estilizado */
+QPlainTextEdit#logConsole {
+    background-color: #020617;
+    color: #38bdf8;  /* Azul ciano para logs normais */
+    font-family: 'Consolas', 'Courier New', monospace;
+    font-size: 11px;
+    border: 1px solid #1e293b;
+    border-radius: 6px;
+}
+
+/* Barras de Progresso */
+QProgressBar {
+    background-color: #1e293b;
+    border: 1px solid #334155;
+    border-radius: 6px;
+    text-align: center;
+    color: #ffffff;
+    font-weight: bold;
+}
+
+QProgressBar::chunk {
+    background-color: #10b981;
+    border-radius: 5px;
+}
