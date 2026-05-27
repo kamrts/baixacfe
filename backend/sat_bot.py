@@ -360,9 +360,28 @@ class SATBot:
             self.log(f"Erro ao capturar números de série: {e}", logging.ERROR)
             return []
 
+    URL_CONSULTA_LOTES = "https://satsp.fazenda.sp.gov.br/COMSAT/Private/ConsultarLotesEnviados/PesquisaLotesEnviados.aspx"
+
     async def navegar_para_consulta_lotes(self, page: Page) -> bool:
-        """Navega no menu superior dinâmico: Cupons -> Consulta Lotes Enviados."""
+        """
+        CORREÇÃO 5 — Navega para a consulta de lotes via URL direta após seleção do CNPJ.
+        Mantém o fluxo atual de login, certificado e seleção de CNPJ inalterados.
+        Apenas altera o endpoint acessado após a seleção do CNPJ.
+        """
         try:
+            # Acesso direto por URL — mais confiável que navegação por menu hover
+            if "PesquisaLotesEnviados" not in page.url:
+                self.log("Navegando para Consulta de Lotes Enviados...")
+                await page.goto(self.URL_CONSULTA_LOTES)
+                await page.wait_for_load_state("networkidle")
+
+            # Verificar se chegou na página correta
+            if "PesquisaLotesEnviados" in page.url or "ConsultarLotesEnviados" in page.url:
+                self.log("Página de consulta de lotes carregada com sucesso.")
+                return True
+
+            # Fallback: navegação via menu hover caso a URL redirecione
+            self.log("URL direta redirecionada. Tentando navegação via menu...", logging.WARNING)
             await page.locator("a:has-text('Cupons')").hover()
             await asyncio.sleep(0.5)
             await page.locator("a:has-text('Consulta Lotes')").click()

@@ -137,6 +137,23 @@ class SATBotIsolated:
             self.log(f"Erro ao consultar chave {chave}: {e}", logging.ERROR)
             return False
 
+    async def _extrair_texto_seguro(self, page: Page, seletor: str, chave: str, campo_nome: str) -> Optional[str]:
+        """
+        Extrai texto de um elemento de forma segura, validando existência antes de usar inner_text().
+        Utiliza wait_for_selector com timeout de 60000ms e captura evidências em caso de erro.
+        """
+        try:
+            await page.wait_for_selector(seletor, timeout=60000)
+            locator = page.locator(seletor).first
+            if await locator.count() > 0:
+                return await locator.inner_text(timeout=60000)
+            else:
+                self.log(f"{campo_nome} não encontrado para chave {chave}", logging.WARNING)
+                return None
+        except Exception as e:
+            self.log(f"Timeout/Erro ao extrair {campo_nome} para chave {chave}: {e}", logging.WARNING)
+            return None
+
     async def raspar_dados_detalhados(self, page: Page, chave: str) -> Tuple[Optional[Dict[str, Any]], List[Dict[str, Any]]]:
         """
         Efetua a raspagem completa de dados do cupom fiscal.
@@ -156,93 +173,249 @@ class SATBotIsolated:
             # Mapear e extrair dados usando seletores semânticos resilientes
             cfe_data["chave"] = chave
             
-            # Número do CF-e (Pode estar em uma label 'lblNumeroCFe' ou texto corrido)
-            num_text = await page.locator("span[id*='lblNumeroCFe'], td:has-text('Número do CF-e') + td").first.inner_text()
-            cfe_data["numero_cfe"] = int(re.sub(r"\D", "", num_text)) if num_text else 0
+            # CORREÇÃO 1 — Número do CF-e com validação e timeout aumentado
+            seletor_numero = "span[id*='lblNumeroCFe'], td:has-text('Número do CF-e') + td"
+            try:
+                await page.wait_for_selector(seletor_numero, timeout=60000)
+                locator_numero = page.locator(seletor_numero).first
+                if await locator_numero.count() > 0:
+                    num_text = await locator_numero.inner_text(timeout=60000)
+                    cfe_data["numero_cfe"] = int(re.sub(r"\D", "", num_text)) if num_text else 0
+                else:
+                    self.log(f"Número CF-e não encontrado: {chave}", logging.WARNING)
+                    cfe_data["numero_cfe"] = 0
+            except Exception as e:
+                self.log(f"Timeout ao extrair Número CF-e para {chave}: {e}", logging.WARNING)
+                # Capturar evidências de erro
+                evidences_dir = Path(__file__).resolve().parent.parent / "logs" / "evidencias"
+                evidences_dir.mkdir(parents=True, exist_ok=True)
+                await page.screenshot(path=str(evidences_dir / f"erro_{chave}.png"))
+                html = await page.content()
+                with open(str(evidences_dir / f"erro_{chave}.html"), "w", encoding="utf-8") as f:
+                    f.write(html)
+                cfe_data["numero_cfe"] = 0
             
-            # Valor Total
-            val_text = await page.locator("span[id*='lblValorTotalCFe'], td:has-text('Valor Total do CF-e') + td").first.inner_text()
-            val_clean = val_text.replace("R$", "").replace(".", "").replace(",", ".").strip() if val_text else "0.00"
-            cfe_data["valor_total"] = float(val_clean)
+            # CORREÇÃO 2 — Captura dos campos principais com validação
+            # Valor Total do CF-e
+            val_text = await self._extrair_texto_seguro(
+                page, 
+                "span[id*='lblValorTotalCFe'], td:has-text('Valor Total do CF-e') + td", 
+                chave, 
+                "Valor Total do CF-e"
+            )
+            if val_text:
+                val_clean = val_text.replace("R$", "").replace(".", "").replace(",", ".").strip()
+                cfe_data["valor_total"] = float(val_clean) if val_clean else 0.00
+            else:
+                cfe_data["valor_total"] = 0.00
             
             # Data/Hora Emissão (ex: 27/05/2026 15:30:22)
-            datetime_text = await page.locator("span[id*='lblDataHoraEmissao'], td:has-text('Data/Hora de Emissão') + td").first.inner_text()
+            datetime_text = await self._extrair_texto_seguro(
+                page,
+                "span[id*='lblDataHoraEmissao'], td:has-text('Data/Hora de Emissão') + td",
+                chave,
+                "Data/Hora de Emissão"
+            )
             if datetime_text:
-                cfe_data["data_hora_emissao"] = datetime.strptime(datetime_text.strip(), "%d/%m/%Y %H:%M:%S")
+                try:
+                    cfe_data["data_hora_emissao"] = datetime.strptime(datetime_text.strip(), "%d/%m/%Y %H:%M:%S")
+                except ValueError:
+                    cfe_data["data_hora_emissao"] = datetime.now()
             else:
                 cfe_data["data_hora_emissao"] = datetime.now()
                 
-            # Emitente CNPJ e Razão Social
-            emit_cnpj_text = await page.locator("span[id*='lblCnpjEmitente'], td:has-text('CNPJ Emitente') + td").first.inner_text()
+            # Emitente CNPJ
+            emit_cnpj_text = await self._extrair_texto_seguro(
+                page,
+                "span[id*='lblCnpjEmitente'], span[id*='lblCnpj'], td:has-text('CNPJ') + td",
+                chave,
+                "CNPJ"
+            )
             cfe_data["cnpj_emitente"] = re.sub(r"\D", "", emit_cnpj_text) if emit_cnpj_text else chave[6:20]
             
-            emit_nome_text = await page.locator("span[id*='lblRazaoSocialEmitente'], td:has-text('Nome / Razão Social') + td").first.inner_text()
+            # Nome / Razão Social do Emitente
+            emit_nome_text = await self._extrair_texto_seguro(
+                page,
+                "span[id*='lblRazaoSocialEmitente'], span[id*='lblRazaoSocial'], td:has-text('Nome / Razão Social') + td, td:has-text('Razão Social') + td",
+                chave,
+                "Nome / Razão Social"
+            )
             cfe_data["nome_emitente"] = emit_nome_text.strip() if emit_nome_text else "Emitente Desconhecido"
             
-            emit_ie_text = await page.locator("span[id*='lblIeEmitente'], td:has-text('Inscrição Estadual') + td").first.inner_text()
+            # Inscrição Estadual
+            emit_ie_text = await self._extrair_texto_seguro(
+                page,
+                "span[id*='lblIeEmitente'], span[id*='lblInscricaoEstadual'], td:has-text('Inscrição Estadual') + td",
+                chave,
+                "Inscrição Estadual"
+            )
             cfe_data["inscricao_estadual"] = re.sub(r"\D", "", emit_ie_text) if emit_ie_text else None
-            cfe_data["uf_emitente"] = "SP"
             
-            # Destinatário Documento e Razão Social
-            dest_doc_text = await page.locator("span[id*='lblCnpjCpfDestinatario'], td:has-text('CPF / CNPJ') + td").first.inner_text()
+            # UF
+            uf_text = await self._extrair_texto_seguro(
+                page,
+                "span[id*='lblUf'], span[id*='lblUF'], td:has-text('UF') + td",
+                chave,
+                "UF"
+            )
+            cfe_data["uf_emitente"] = uf_text.strip() if uf_text else "SP"
+            
+            # Destinatário CPF / CNPJ
+            dest_doc_text = await self._extrair_texto_seguro(
+                page,
+                "span[id*='lblCnpjCpfDestinatario'], span[id*='lblCpfCnpjDestinatario'], td:has-text('CPF / CNPJ') + td",
+                chave,
+                "CPF / CNPJ Destinatário"
+            )
             cfe_data["destinatario_documento"] = re.sub(r"\D", "", dest_doc_text) if dest_doc_text else None
             
-            dest_nome_text = await page.locator("span[id*='lblRazaoSocialDestinatario'], td:has-text('Destinatário Nome') + td").first.inner_text()
+            # Destinatário Nome / Razão Social
+            dest_nome_text = await self._extrair_texto_seguro(
+                page,
+                "span[id*='lblRazaoSocialDestinatario'], span[id*='lblNomeDestinatario'], td:has-text('Destinatário') + td",
+                chave,
+                "Nome / Razão Social Destinatário"
+            )
             cfe_data["destinatario_nome"] = dest_nome_text.strip() if dest_nome_text else None
             
-            # 2. PASSO 6 — Extração da Aba "Produtos/Serviços" (Itens)
-            tab_produtos = page.locator("a:has-text('Produtos'), a[id*='tabProdutos'], a:has-text('Serviços')").first
-            if await tab_produtos.count() > 0:
-                await tab_produtos.click()
-                await asyncio.sleep(1)
+            # CORREÇÃO 3 — Clicar obrigatoriamente na aba Produtos/Serviços
+            # Usar seletor específico do input type="submit" conforme HTML fornecido
+            seletor_aba_produtos = "#conteudo_tabProdutoServico, input[id*='tabProdutoServico'], input[value*='Produtos'], a:has-text('Produtos'), a[id*='tabProdutos'], a:has-text('Serviços')"
+            
+            try:
+                await page.wait_for_selector(seletor_aba_produtos, timeout=60000)
+                tab_produtos = page.locator(seletor_aba_produtos).first
+                if await tab_produtos.count() > 0:
+                    await tab_produtos.click()
+                    self.log(f"Aba Produtos/Serviços clicada com sucesso para chave {chave}")
+                    # Aguardar carregamento após clique
+                    await page.wait_for_timeout(3000)
+                    await page.wait_for_load_state("networkidle")
+                else:
+                    self.log(f"Aba Produtos/Serviços não encontrada para chave {chave}", logging.WARNING)
+            except Exception as e:
+                self.log(f"Erro ao clicar na aba Produtos/Serviços para {chave}: {e}", logging.WARNING)
+                # Capturar evidências
+                evidences_dir = Path(__file__).resolve().parent.parent / "logs" / "evidencias"
+                evidences_dir.mkdir(parents=True, exist_ok=True)
+                await page.screenshot(path=str(evidences_dir / f"erro_aba_produtos_{chave}.png"))
+                html = await page.content()
+                with open(str(evidences_dir / f"erro_aba_produtos_{chave}.html"), "w", encoding="utf-8") as f:
+                    f.write(html)
                 
             # Localizar tabela de produtos (geralmente uma tabela de id grvProdutos ou table)
-            linhas_prod = await page.locator("table[id*='grvProdutos'] tr, table[id*='gridProdutos'] tr").all()
+            linhas_prod = await page.locator("table[id*='grvProdutos'] tr, table[id*='gridProdutos'] tr, table[id*='Produtos'] tr").all()
             
             if not linhas_prod:
                 self.log(f"Tabela de produtos vazia ou não encontrada para a chave {chave}.", logging.WARNING)
                 return cfe_data, []
+            
+            # CORREÇÃO 4 — Capturar TODOS os campos de produtos/serviços
+            # Obter cabeçalhos da tabela para mapeamento dinâmico
+            header_row = await page.locator("table[id*='grvProdutos'] tr:first-child th, table[id*='gridProdutos'] tr:first-child th, table[id*='Produtos'] tr:first-child th").all_inner_texts()
+            
+            # Mapeamento de nomes de colunas para índices
+            col_map = {}
+            for idx_h, header in enumerate(header_row):
+                header_lower = header.strip().lower()
+                if "núm" in header_lower or "num" in header_lower:
+                    col_map["numero_item"] = idx_h
+                elif "descrição" in header_lower or "descricao" in header_lower:
+                    col_map["descricao"] = idx_h
+                elif "qtd" in header_lower and "comercial" in header_lower:
+                    col_map["quantidade_comercial"] = idx_h
+                elif "unid" in header_lower and "comercial" in header_lower:
+                    col_map["unidade_comercial"] = idx_h
+                elif "valor líquido" in header_lower or "valor liquido" in header_lower:
+                    col_map["valor_liquido"] = idx_h
+                elif "cód. produto" in header_lower or "cod. produto" in header_lower or "código produto" in header_lower:
+                    col_map["codigo_produto"] = idx_h
+                elif "gtin" in header_lower:
+                    col_map["gtin"] = idx_h
+                elif "ncm" in header_lower:
+                    col_map["ncm"] = idx_h
+                elif "cest" in header_lower or "especificador" in header_lower:
+                    col_map["cest"] = idx_h
+                elif "cfop" in header_lower:
+                    col_map["cfop"] = idx_h
+                elif "valor unit" in header_lower:
+                    col_map["valor_unitario"] = idx_h
+                elif "valor bruto" in header_lower:
+                    col_map["valor_bruto"] = idx_h
+                elif "desconto" in header_lower:
+                    col_map["valor_desconto"] = idx_h
+                elif "observ" in header_lower and "fisco" in header_lower:
+                    col_map["observacoes_fisco"] = idx_h
+                elif "origem" in header_lower and "mercadoria" in header_lower:
+                    col_map["origem_mercadoria"] = idx_h
+                elif "tributação" in header_lower or "tributacao" in header_lower:
+                    col_map["tributacao_icms"] = idx_h
+                elif "simples nacional" in header_lower or "situação" in header_lower:
+                    col_map["situacao_simples_nacional"] = idx_h
+                elif "valor" in header_lower and "icms" in header_lower:
+                    col_map["valor_icms"] = idx_h
                 
             # Processar linhas da tabela (Ignorando cabeçalho)
             for idx, linha in enumerate(linhas_prod[1:]):
                 colunas = await linha.locator("td").all_inner_texts()
-                if len(colunas) < 8:
+                if len(colunas) < 4:
                     continue
+                
+                # Função auxiliar para extrair valor de coluna de forma segura
+                def get_col(nome_col: str, default: any = None) -> any:
+                    if nome_col in col_map and col_map[nome_col] < len(colunas):
+                        return colunas[col_map[nome_col]].strip()
+                    return default
+                
+                def parse_float(valor: str) -> float:
+                    if not valor:
+                        return 0.00
+                    try:
+                        return float(valor.replace(".", "").replace(",", ".").strip())
+                    except ValueError:
+                        return 0.00
+                
+                def parse_int(valor: str) -> int:
+                    if not valor:
+                        return 0
+                    try:
+                        return int(re.sub(r"\D", "", valor))
+                    except ValueError:
+                        return 0
                     
                 # Extração posicional ou baseada em cabeçalhos (Mapeamento de colunas do SAT SP)
-                # 1. Num | 2. Descrição | 3. Qtd. | 4. Unid. | 5. Valor Líquido | 6. Cód. Produto...
+                # CORREÇÃO 4 — Capturar TODOS os campos solicitados
                 item = {
-                    "numero_item": int(colunas[0].strip()) if colunas[0].strip().isdigit() else idx + 1,
-                    "descricao": colunas[1].strip(),
-                    "quantidade_comercial": float(colunas[2].replace(".", "").replace(",", ".").strip()) if colunas[2] else 0.00,
-                    "unidade_comercial": colunas[3].strip(),
-                    "valor_liquido": float(colunas[4].replace(".", "").replace(",", ".").strip()) if colunas[4] else 0.00,
-                    "codigo_produto": colunas[5].strip(),
-                    # Valores padrão ou colunas adicionais se expandido o detalhe do item
-                    "valor_unitario": float(colunas[6].replace(".", "").replace(",", ".").strip()) if len(colunas) > 6 and colunas[6] else 0.00,
-                    "valor_bruto": float(colunas[7].replace(".", "").replace(",", ".").strip()) if len(colunas) > 7 and colunas[7] else 0.00,
-                    "valor_desconto": 0.00,
-                    "cfop": "5929", # Padrão SAT se não especificado
-                    "ncm": None,
-                    "cest": None,
-                    "gtin": None,
-                    "origem_mercadoria": 0,
-                    "tributacao_icms": "102",
-                    "situacao_simples_nacional": "102",
-                    "valor_icms": 0.00,
-                    "observacoes_fisco": None
+                    # Campos obrigatórios
+                    "numero_item": parse_int(get_col("numero_item")) or idx + 1,
+                    "descricao": get_col("descricao", colunas[1] if len(colunas) > 1 else ""),
+                    "quantidade_comercial": parse_float(get_col("quantidade_comercial", colunas[2] if len(colunas) > 2 else "0")),
+                    "unidade_comercial": get_col("unidade_comercial", colunas[3] if len(colunas) > 3 else "UN"),
+                    "valor_liquido": parse_float(get_col("valor_liquido", colunas[4] if len(colunas) > 4 else "0")),
+                    "codigo_produto": get_col("codigo_produto", colunas[5] if len(colunas) > 5 else ""),
+                    # Campos adicionais solicitados na CORREÇÃO 4
+                    "gtin": get_col("gtin", None),
+                    "ncm": get_col("ncm", None),
+                    "cest": get_col("cest", None),
+                    "cfop": get_col("cfop", "5929"),
+                    "valor_unitario": parse_float(get_col("valor_unitario", colunas[6] if len(colunas) > 6 else "0")),
+                    "valor_bruto": parse_float(get_col("valor_bruto", colunas[7] if len(colunas) > 7 else "0")),
+                    "valor_desconto": parse_float(get_col("valor_desconto", "0")),
+                    "observacoes_fisco": get_col("observacoes_fisco", None),
+                    "origem_mercadoria": parse_int(get_col("origem_mercadoria", "0")),
+                    "tributacao_icms": get_col("tributacao_icms", "102"),
+                    "situacao_simples_nacional": get_col("situacao_simples_nacional", "102"),
+                    "valor_icms": parse_float(get_col("valor_icms", "0")),
                 }
                 
-                # Se as colunas adicionais estiverem disponíveis no expandir ou detalhes
-                # Algumas grades exigem clicar num botão de expansão para obter impostos, CST, NCM, CEST.
-                # Tentaremos ler colunas se a grade tiver mais dados de impostos.
-                if len(colunas) >= 12:
-                    item["cfop"] = colunas[8].strip()
-                    item["ncm"] = colunas[9].strip() if colunas[9] else None
-                    item["cest"] = colunas[10].strip() if colunas[10] else None
-                    item["gtin"] = colunas[11].strip() if colunas[11] else None
-                if len(colunas) >= 15:
-                    item["valor_icms"] = float(colunas[14].replace(".", "").replace(",", ".").strip()) if colunas[14] else 0.00
+                # Fallback para extração posicional se mapeamento dinâmico não encontrou todos os campos
+                if len(colunas) >= 12 and not item["cfop"]:
+                    item["cfop"] = colunas[8].strip() if colunas[8] else "5929"
+                    item["ncm"] = colunas[9].strip() if len(colunas) > 9 and colunas[9] else None
+                    item["cest"] = colunas[10].strip() if len(colunas) > 10 and colunas[10] else None
+                    item["gtin"] = colunas[11].strip() if len(colunas) > 11 and colunas[11] else None
+                if len(colunas) >= 15 and item["valor_icms"] == 0.00:
+                    item["valor_icms"] = parse_float(colunas[14]) if colunas[14] else 0.00
                     
                 itens_data.append(item)
                 
@@ -251,6 +424,16 @@ class SATBotIsolated:
             
         except Exception as e:
             self.log(f"Erro ao raspar dados da nota {chave}: {e}", logging.ERROR)
+            # Capturar evidências em caso de erro geral
+            try:
+                evidences_dir = Path(__file__).resolve().parent.parent / "logs" / "evidencias"
+                evidences_dir.mkdir(parents=True, exist_ok=True)
+                await page.screenshot(path=str(evidences_dir / f"erro_{chave}.png"))
+                html = await page.content()
+                with open(str(evidences_dir / f"erro_{chave}.html"), "w", encoding="utf-8") as f:
+                    f.write(html)
+            except Exception:
+                pass
             return None, []
 
     async def processar_planilha_xlsx(self, file_path: Path, output_folder: Path) -> List[Dict[str, Any]]:
