@@ -151,6 +151,13 @@ class StateManager:
             # Log detalhado para debug
             logger.info(f"[DEBUG] Salvando CF-e: chave={cfe_data.get('chave')}, numero={cfe_data.get('numero_cfe')}, valor={cfe_data.get('valor_total')}")
             
+            # Sanitizar dados do cabeçalho - converter None para valores apropriados onde necessário
+            # Campos que devem ser None quando não informados (nullable=True)
+            nullable_cfe_fields = ['destinatario_documento', 'destinatario_nome', 'inscricao_estadual', 'caminho_xml']
+            for field in nullable_cfe_fields:
+                if field in cfe_data and cfe_data[field] == '':
+                    cfe_data[field] = None
+            
             # 1. Verificar se já existe
             cfe = session.query(Cfe).filter(Cfe.chave == cfe_data["chave"]).first()
             
@@ -167,19 +174,45 @@ class StateManager:
                 
             session.flush() # Sincroniza estado para obter foreign key se necessário
             
-            # 2. Inserir itens
-            for item in items_data:
+            # 2. Inserir itens - sanitizar campos nullable
+            nullable_item_fields = ['info_adicional', 'gtin', 'ncm', 'cest', 'regra_calculo', 
+                                    'observacoes_fisco', 'origem_mercadoria', 'tributacao_icms', 
+                                    'situacao_simples_nacional', 'pis_cst', 'cofins_cst']
+            
+            for idx, item in enumerate(items_data):
                 item["chave_cfe"] = cfe.chave
-                cfe_item = CfeItem(**item)
-                session.add(cfe_item)
+                
+                # Converter strings vazias para None nos campos nullable
+                for field in nullable_item_fields:
+                    if field in item and item[field] == '':
+                        item[field] = None
+                
+                # Garantir valores numéricos padrão quando None
+                numeric_fields = ['quantidade_comercial', 'valor_unitario', 'valor_bruto', 'valor_liquido',
+                                 'valor_desconto', 'outras_despesas', 'rateio_desconto', 'rateio_acrescimo',
+                                 'aliquota_efetiva', 'valor_icms', 'pis_base_calculo', 'pis_aliquota', 
+                                 'pis_valor', 'cofins_base_calculo', 'cofins_aliquota', 'cofins_valor',
+                                 'valor_aproximado_tributos']
+                for field in numeric_fields:
+                    if field in item and item[field] is None:
+                        item[field] = 0.0
+                
+                try:
+                    cfe_item = CfeItem(**item)
+                    session.add(cfe_item)
+                except Exception as item_err:
+                    logger.error(f"[DEBUG] Erro ao criar item {idx+1}: {type(item_err).__name__}: {item_err}")
+                    logger.error(f"[DEBUG] Dados do item: {item}")
+                    raise
                 
             session.commit()
             logger.info(f"[DEBUG] CF-e {cfe_data.get('chave')} salvo com sucesso com {len(items_data)} itens")
             return True
         except Exception as e:
             session.rollback()
+            import traceback
             logger.error(f"Erro ao salvar CF-e {cfe_data.get('chave')} no banco: {type(e).__name__}: {e}")
-            logger.error(f"[DEBUG] Dados CFe que falharam: {cfe_data}")
+            logger.error(f"[DEBUG] Traceback completo: {traceback.format_exc()}")
             return False
 
     @staticmethod
