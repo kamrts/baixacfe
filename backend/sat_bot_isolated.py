@@ -158,19 +158,45 @@ class SATBotIsolated:
         """
         Extrai valor de um campo baseado na estrutura HTML real do SAT SP.
         Estrutura: <span class="TituloCampo">Label:</span> seguido de <span class="ValorCampo">Valor</span>
+        Ou dentro de div.LinhaCampo contendo ambos os spans.
         """
         try:
-            # Tentar encontrar pelo padrão TituloCampo -> ValorCampo
-            seletor = f"span.TituloCampo:has-text('{titulo}') ~ span.ValorCampo, span.TituloCampo:has-text('{titulo}') + span.ValorCampo"
-            locator = page.locator(seletor).first
-            if await locator.count() > 0:
-                return await locator.inner_text(timeout=60000)
+            # Estratégia 1: Procurar dentro da mesma div.LinhaCampo
+            seletor_linha = f"div.LinhaCampo:has(span.TituloCampo:has-text('{titulo}')) span.ValorCampo"
+            locator_linha = page.locator(seletor_linha).first
+            if await locator_linha.count() > 0:
+                valor = await locator_linha.inner_text(timeout=10000)
+                if valor and valor.strip():
+                    return valor.strip()
             
-            # Fallback: procurar na div pai
-            seletor_div = f"div.TituloLinhaCampo:has(span.TituloCampo:has-text('{titulo}')) + div span.ValorCampo, div:has(span.TituloCampo:has-text('{titulo}')) span.ValorCampo"
-            locator_div = page.locator(seletor_div).first
-            if await locator_div.count() > 0:
-                return await locator_div.inner_text(timeout=60000)
+            # Estratégia 2: Procurar irmão direto do TituloCampo
+            seletor_irmao = f"span.TituloCampo:has-text('{titulo}') + span.ValorCampo"
+            locator_irmao = page.locator(seletor_irmao).first
+            if await locator_irmao.count() > 0:
+                valor = await locator_irmao.inner_text(timeout=10000)
+                if valor and valor.strip():
+                    return valor.strip()
+            
+            # Estratégia 3: Procurar no contexto de TituloLinhaCampo seguido de ValorLinhaCampo
+            seletor_titulo_linha = f"div.TituloLinhaCampo:has(span.TituloCampo:has-text('{titulo}')) + div.ValorLinhaCampo span.ValorCampo"
+            locator_titulo_linha = page.locator(seletor_titulo_linha).first
+            if await locator_titulo_linha.count() > 0:
+                valor = await locator_titulo_linha.inner_text(timeout=10000)
+                if valor and valor.strip():
+                    return valor.strip()
+                    
+            # Estratégia 4: XPath mais preciso - encontrar o span TituloCampo e pegar o próximo ValorCampo na mesma linha
+            try:
+                elementos = await page.locator(f"span.TituloCampo:text-is('{titulo}:'), span.TituloCampo:text-is('{titulo}')").all()
+                for elem in elementos:
+                    parent = elem.locator("xpath=..")
+                    valor_elem = parent.locator("span.ValorCampo").first
+                    if await valor_elem.count() > 0:
+                        valor = await valor_elem.inner_text(timeout=5000)
+                        if valor and valor.strip():
+                            return valor.strip()
+            except Exception:
+                pass
                 
             return None
         except Exception as e:
@@ -203,16 +229,24 @@ class SATBotIsolated:
             cfe_data["chave"] = chave
             
             # CORREÇÃO 1 — Número do CF-e com validação e timeout aumentado
-            seletor_numero = "span[id*='lblNumeroCFe'], span.ValorCampo"
+            # Usar seletor específico para evitar pegar a chave completa
             try:
-                # Tentar extrair pelo título específico
+                # Tentar extrair pelo título específico primeiro
                 num_text = await self._extrair_campo_por_titulo(page, "Número do CF-e", chave)
                 if not num_text:
-                    await page.wait_for_selector(seletor_numero, timeout=60000)
-                    locator_numero = page.locator(seletor_numero).first
+                    # Fallback: usar ID específico do label
+                    seletor_numero_especifico = "span[id*='lblNumeroCFe'], span[id*='lblNumero']"
+                    locator_numero = page.locator(seletor_numero_especifico).first
                     if await locator_numero.count() > 0:
                         num_text = await locator_numero.inner_text(timeout=60000)
-                cfe_data["numero_cfe"] = int(re.sub(r"\D", "", num_text)) if num_text else 0
+                # Validar que não é a chave completa (44 dígitos)
+                if num_text:
+                    num_clean = re.sub(r"\D", "", num_text)
+                    if len(num_clean) == 44:
+                        # Pegou a chave por engano, tentar outro seletor
+                        self.log(f"Seletor pegou chave completa, tentando alternativa para {chave}", logging.WARNING)
+                        num_text = None
+                cfe_data["numero_cfe"] = int(re.sub(r"\D", "", num_text)) if num_text and len(re.sub(r"\D", "", num_text)) < 20 else 0
             except Exception as e:
                 self.log(f"Timeout ao extrair Número CF-e para {chave}: {e}", logging.WARNING)
                 # Capturar evidências de erro
@@ -228,15 +262,24 @@ class SATBotIsolated:
             # Valor Total do CF-e
             val_text = await self._extrair_campo_por_titulo(page, "Valor Total do CF-e", chave)
             if not val_text:
-                val_text = await self._extrair_texto_seguro(
-                    page, 
-                    "span[id*='lblValorTotalCFe']", 
-                    chave, 
-                    "Valor Total do CF-e"
-                )
+                val_text = await self._extrair_campo_por_titulo(page, "Valor Total", chave)
+            if not val_text:
+                # Fallback: usar ID específico
+                locator_val = page.locator("span[id*='lblValorTotalCFe'], span[id*='lblValorTotal']").first
+                if await locator_val.count() > 0:
+                    val_text = await locator_val.inner_text(timeout=10000)
             if val_text:
+                # Limpar e validar que é um valor monetário
                 val_clean = val_text.replace("R$", "").replace(".", "").replace(",", ".").strip()
-                cfe_data["valor_total"] = float(val_clean) if val_clean else 0.00
+                # Verificar se parece um valor monetário (não a chave)
+                if val_clean and len(val_clean) < 20:
+                    try:
+                        cfe_data["valor_total"] = float(val_clean)
+                    except ValueError:
+                        self.log(f"Valor Total inválido para {chave}: {val_text}", logging.WARNING)
+                        cfe_data["valor_total"] = 0.00
+                else:
+                    cfe_data["valor_total"] = 0.00
             else:
                 cfe_data["valor_total"] = 0.00
             
