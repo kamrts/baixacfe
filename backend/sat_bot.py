@@ -595,13 +595,24 @@ class SATBot:
 
     def validar_e_extrair_chave(self, file_path: Path) -> Optional[str]:
         """
-        Abre o arquivo baixado, checa se possui tamanho > 0 bytes e
+        CORREÇÃO: Validação robusta do XML baixado.
+        Abre o arquivo baixado, checa se possui tamanho > 0 bytes,
+        verifica se o conteúdo inicia com XML válido e
         extrai o atributo 'Id' da tag CFe (ex: Id="CFe352605...").
         """
         if not file_path.exists() or file_path.stat().st_size == 0:
+            self.log(f"Arquivo inexistente ou vazio: {file_path}", logging.WARNING)
             return None
-            
+        
         try:
+            # CORREÇÃO: Validar se o conteúdo inicia com XML válido antes de parsear
+            with open(file_path, 'rb') as f:
+                inicio = f.read(100)
+                # Verificar se inicia com declaração XML ou tag XML válida
+                if not (inicio.strip().startswith(b'<?xml') or inicio.strip().startswith(b'<CFe') or inicio.strip().startswith(b'<cfe')):
+                    self.log(f"Arquivo não é XML válido (início: {inicio[:50]}...)", logging.WARNING)
+                    return None
+            
             tree = ET.parse(file_path)
             root = tree.getroot()
             
@@ -615,8 +626,16 @@ class SATBot:
                     chave = infCfe.attrib["Id"].replace("CFe", "")
                     if len(chave) == 44 and chave.isdigit():
                         return chave
+                    else:
+                        self.log(f"Chave extraída inválida: {chave}", logging.WARNING)
+            else:
+                self.log(f"Tag raiz inesperada: {tag_name}", logging.WARNING)
             return None
-        except Exception:
+        except ET.ParseError as pe:
+            self.log(f"Erro de parse XML: {pe}", logging.WARNING)
+            return None
+        except Exception as e:
+            self.log(f"Erro ao validar XML: {e}", logging.WARNING)
             return None
 
     def extrair_data_emissao_xml(self, file_path: Path) -> Optional[datetime]:

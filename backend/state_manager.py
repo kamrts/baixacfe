@@ -146,6 +146,7 @@ class StateManager:
         """
         Salva o cabeçalho do cupom fiscal e todos os seus itens no banco SQL Server.
         Utiliza UPSERT com base na chave principal.
+        CORREÇÃO: Valida duplicidade de itens antes de inserir.
         """
         try:
             # Log detalhado para debug
@@ -179,8 +180,28 @@ class StateManager:
                                     'observacoes_fisco', 'origem_mercadoria', 'tributacao_icms', 
                                     'situacao_simples_nacional', 'pis_cst', 'cofins_cst']
             
+            # CORREÇÃO: Set para rastrear itens já inseridos e evitar duplicidade no INSERT
+            itens_inseridos = set()
+            itens_validos = 0
+            
             for idx, item in enumerate(items_data):
                 item["chave_cfe"] = cfe.chave
+                
+                # CORREÇÃO: Criar chave única para validar duplicidade antes do INSERT
+                numero_item = item.get("numero_item", idx + 1)
+                codigo_produto = item.get("codigo_produto", "")
+                chave_unica = f"{cfe.chave}|{numero_item}|{codigo_produto}"
+                
+                if chave_unica in itens_inseridos:
+                    logger.warning(f"[DEBUG] Item duplicado ignorado no INSERT: numero_item={numero_item}, codigo={codigo_produto}")
+                    continue
+                itens_inseridos.add(chave_unica)
+                
+                # CORREÇÃO: Validar se o item possui dados reais (descrição ou código)
+                descricao = item.get("descricao", "")
+                if not descricao and not codigo_produto:
+                    logger.warning(f"[DEBUG] Item {idx + 1} ignorado: sem descrição e sem código de produto")
+                    continue
                 
                 # Converter strings vazias para None nos campos nullable
                 for field in nullable_item_fields:
@@ -200,13 +221,14 @@ class StateManager:
                 try:
                     cfe_item = CfeItem(**item)
                     session.add(cfe_item)
+                    itens_validos += 1
                 except Exception as item_err:
                     logger.error(f"[DEBUG] Erro ao criar item {idx+1}: {type(item_err).__name__}: {item_err}")
                     logger.error(f"[DEBUG] Dados do item: {item}")
                     raise
                 
             session.commit()
-            logger.info(f"[DEBUG] CF-e {cfe_data.get('chave')} salvo com sucesso com {len(items_data)} itens")
+            logger.info(f"[DEBUG] CF-e {cfe_data.get('chave')} salvo com sucesso com {itens_validos} itens (de {len(items_data)} recebidos)")
             return True
         except Exception as e:
             session.rollback()

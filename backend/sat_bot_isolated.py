@@ -504,7 +504,13 @@ class SATBotIsolated:
                     return None
                 return valor.strip()
             
-            # Processar cada item usando os IDs dos spans
+            # CORREÇÃO: Limpar lista de itens antes de processar para evitar duplicatas
+            itens_data.clear()
+            
+            # Set para rastrear itens já processados e evitar duplicidade
+            itens_processados = set()
+            
+            # Processar cada item usando os IDs dos spans (método primário)
             for idx in range(num_itens):
                 try:
                     # Função para extrair valor do span pelo ID
@@ -518,14 +524,31 @@ class SATBotIsolated:
                         return None
                     
                     # Extrair todos os campos usando os IDs corretos do HTML
+                    numero_item = parse_int(await get_span_value("lblProdutoServicoNum")) or idx + 1
+                    codigo_produto = limpar_valor(await get_span_value("lblProdutoServicoCodigoProduto")) or ""
+                    descricao = limpar_valor(await get_span_value("lblProdutoServicoDesc")) or ""
+                    
+                    # CORREÇÃO: Validar se linha possui dados reais antes de inserir
+                    # Ignorar linhas vazias ou com dados insuficientes
+                    if not descricao and not codigo_produto:
+                        self.log(f"[DEBUG] Item {idx + 1} ignorado: sem descrição e sem código de produto", logging.WARNING)
+                        continue
+                    
+                    # CORREÇÃO: Criar chave única para validar duplicidade
+                    chave_unica = f"{numero_item}|{codigo_produto}|{descricao}"
+                    if chave_unica in itens_processados:
+                        self.log(f"[DEBUG] Item {idx + 1} ignorado: duplicado (chave={chave_unica})", logging.WARNING)
+                        continue
+                    itens_processados.add(chave_unica)
+                    
                     item = {
-                        "numero_item": parse_int(await get_span_value("lblProdutoServicoNum")) or idx + 1,
-                        "descricao": limpar_valor(await get_span_value("lblProdutoServicoDesc")) or "",
+                        "numero_item": numero_item,
+                        "descricao": descricao,
                         "quantidade_comercial": parse_float(await get_span_value("lblProdutoServicoQtd")),
                         "unidade_comercial": limpar_valor(await get_span_value("lblProdutoServicoUnit")) or "UN",
                         "valor_liquido": parse_float(await get_span_value("lblProdutoServicoIcmsValorLiquidoItem")),
                         "info_adicional": limpar_valor(await get_span_value("lblProdutoServicoInformacaoAdicionalProduto")),
-                        "codigo_produto": limpar_valor(await get_span_value("lblProdutoServicoCodigoProduto")) or "",
+                        "codigo_produto": codigo_produto,
                         "gtin": limpar_valor(await get_span_value("lblProdutoServicoGtin")),
                         "ncm": limpar_valor(await get_span_value("lblProdutoServicoNcm")),
                         "cest": limpar_valor(await get_span_value("lblCest")),
@@ -567,54 +590,9 @@ class SATBotIsolated:
                     self.log(f"[DEBUG] Erro ao processar item {idx + 1}: {e}", logging.WARNING)
                     continue
             
-            # Processar cada linha da tabela (ignorando cabeçalho - linha 0)
-            for idx, linha in enumerate(linhas_prod[1:]):
-                try:
-                    # Extrair todas as colunas <td> da linha
-                    colunas = await linha.locator("td").all_inner_texts()
-                    
-                    if not colunas or len(colunas) < 5:
-                        self.log(f"[DEBUG] Linha {idx + 1} com poucas colunas ({len(colunas) if colunas else 0}), ignorando", logging.WARNING)
-                        continue
-                    
-                    self.log(f"[DEBUG] Linha {idx + 1}: {len(colunas)} colunas encontradas")
-                    
-                    # Extrair campos por posição (baseado na estrutura do cabeçalho)
-                    item = {
-                        "numero_item": parse_int(colunas[0]) if len(colunas) > 0 else idx + 1,
-                        "descricao": limpar_valor(colunas[1]) if len(colunas) > 1 else "",
-                        "quantidade_comercial": parse_float(colunas[2]) if len(colunas) > 2 else 0.00,
-                        "unidade_comercial": limpar_valor(colunas[3]) if len(colunas) > 3 else "UN",
-                        "valor_liquido": parse_float(colunas[4]) if len(colunas) > 4 else 0.00,
-                        "info_adicional": limpar_valor(colunas[5]) if len(colunas) > 5 else None,
-                        "codigo_produto": limpar_valor(colunas[6]) if len(colunas) > 6 else "",
-                        "gtin": limpar_valor(colunas[7]) if len(colunas) > 7 else None,
-                        "ncm": limpar_valor(colunas[8]) if len(colunas) > 8 else None,
-                        "cest": limpar_valor(colunas[9]) if len(colunas) > 9 else None,
-                        "cfop": limpar_valor(colunas[10]) if len(colunas) > 10 else "5929",
-                        "valor_unitario": parse_float(colunas[11]) if len(colunas) > 11 else 0.00,
-                        "valor_bruto": parse_float(colunas[12]) if len(colunas) > 12 else 0.00,
-                        "regra_calculo": limpar_valor(colunas[13]) if len(colunas) > 13 else None,
-                        "valor_desconto": parse_float(colunas[14]) if len(colunas) > 14 else 0.00,
-                        "outras_despesas": parse_float(colunas[15]) if len(colunas) > 15 else 0.00,
-                        "rateio_desconto": parse_float(colunas[16]) if len(colunas) > 16 else 0.00,
-                        "rateio_acrescimo": parse_float(colunas[17]) if len(colunas) > 17 else 0.00,
-                        "observacoes_fisco": limpar_valor(colunas[18]) if len(colunas) > 18 else None,
-                        "origem_mercadoria": limpar_valor(colunas[19]) if len(colunas) > 19 else None,
-                        "tributacao_icms": limpar_valor(colunas[20]) if len(colunas) > 20 else None,
-                        "situacao_simples_nacional": limpar_valor(colunas[21]) if len(colunas) > 21 else None,
-                        "valor_icms": parse_float(colunas[22]) if len(colunas) > 22 else 0.00,
-                    }
-                    
-                    # Log do primeiro item para debug
-                    if idx == 0:
-                        self.log(f"[DEBUG] Primeiro item extraído: {item}")
-                    
-                    itens_data.append(item)
-                    
-                except Exception as e:
-                    self.log(f"[DEBUG] Erro ao processar linha {idx + 1}: {e}", logging.WARNING)
-                    continue
+            # CORREÇÃO: Removido o segundo loop que processava as linhas novamente via <td>
+            # O loop acima usando IDs de spans já extrai todos os dados necessários
+            # O segundo loop estava causando duplicidade de itens
                 
             self.log(f"Chave {chave} raspada com sucesso. Encontrados {len(itens_data)} itens de produto.")
             return cfe_data, itens_data
