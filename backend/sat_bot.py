@@ -492,47 +492,77 @@ class SATBot:
         """
         Varre todos os links de download de XML na página ativa da GridView,
         valida os arquivos fisicamente e os organiza em pastas.
+        
+        CORREÇÃO: Usa o ID exato do botão Download da tabela de lotes:
+        conteudo_grvConsultarLotesEnviados_lkbDownloadXml_X
         """
         downloaded_count = 0
         
-        # Selecionar botões ou links que acionam downloads
-        # Normalmente são links com ícones de disquete, seta ou texto "Download"
-        download_links = await page.locator("a[id*='lnkDownload'], input[value='Download'], a:has-text('Download')").all()
+        # CORREÇÃO: Seletor específico para os links de Download na tabela de lotes
+        # O ID segue o padrão: conteudo_grvConsultarLotesEnviados_lkbDownloadXml_0, _1, _2...
+        download_selector = "a[id^='conteudo_grvConsultarLotesEnviados_lkbDownloadXml_']"
+        download_links = await page.locator(download_selector).all()
+        
+        # Fallback: tentar outros seletores caso o principal não encontre
+        if not download_links:
+            self.log("[DEBUG] Seletor principal não encontrou links, tentando fallback...")
+            download_links = await page.locator("a:has-text('Download')").all()
         
         if not download_links:
             self.log("Nenhum cupom disponível para download nesta página.")
             return 0
             
-        self.log(f"Processando {len(download_links)} possíveis downloads na página {pagina_atual}...")
+        self.log(f"Processando {len(download_links)} downloads na página {pagina_atual}...")
         
         for idx in range(len(download_links)):
             if not self.is_running:
                 break
                 
             # Executar verificação especial de recuperação automática de sessão antes de cada download
-            # Se fomos deslogados ou ejetaods para a Home, recuperamos!
             recuperou = await self.verificar_e_recuperar_sessao(page, cnpj, serie)
             if recuperou:
-                # Se reiniciou, re-busca as referências e re-posiciona
-                download_links = await page.locator("a[id*='lnkDownload'], input[value='Download'], a:has-text('Download')").all()
+                # Se reiniciou, re-busca as referências
+                download_links = await page.locator(download_selector).all()
+                if not download_links:
+                    download_links = await page.locator("a:has-text('Download')").all()
                 if idx >= len(download_links):
                     break
                     
             try:
-                # 1. Configurar escuta do evento de download no Playwright
-                link = download_links[idx]
+                # CORREÇÃO: Buscar o link pelo ID exato para evitar stale reference
+                link = page.locator(f"#conteudo_grvConsultarLotesEnviados_lkbDownloadXml_{idx}")
                 
-                async with page.expect_download(timeout=15000) as download_info:
+                # Verificar se o link existe, senão usar fallback
+                if await link.count() == 0:
+                    self.log(f"[DEBUG] Link #{idx} não encontrado por ID, usando lista...")
+                    current_links = await page.locator(download_selector).all()
+                    if not current_links:
+                        current_links = await page.locator("a:has-text('Download')").all()
+                    if idx < len(current_links):
+                        link = current_links[idx]
+                    else:
+                        continue
+                
+                self.log(f"[DEBUG] Clicando no botão Download #{idx}...")
+                
+                # Criar diretório temporário antes do download
+                temp_dir = self.download_folder / "temp"
+                temp_dir.mkdir(parents=True, exist_ok=True)
+                
+                # Configurar escuta do evento de download no Playwright (timeout aumentado)
+                async with page.expect_download(timeout=30000) as download_info:
                     await link.click()
                     
                 download = await download_info.value
                 
-                # 2. Salvar em pasta temporária
+                # Salvar em pasta temporária
                 temp_filename = f"temp_{idx}_{int(datetime.now().timestamp())}.xml"
-                temp_path = self.download_folder / "temp" / temp_filename
+                temp_path = temp_dir / temp_filename
                 await download.save_as(temp_path)
                 
-                # 3. Validar integridade do XML e extrair Chave de Acesso
+                self.log(f"[DEBUG] Download salvo em: {temp_path}")
+                
+                # Validar integridade do XML e extrair Chave de Acesso
                 chave = self.validar_e_extrair_chave(temp_path)
                 
                 if chave:
