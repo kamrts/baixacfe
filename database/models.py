@@ -89,13 +89,13 @@ class CfeItem(Base):
     aliquota_efetiva = Column(Numeric(8, 4), default=0.00)
     
     # PIS
-    pis_cst = Column(String(100), nullable=True)
+    pis_cst = Column(String(255), nullable=True)
     pis_base_calculo = Column(Numeric(12, 2), default=0.00)
     pis_aliquota = Column(Numeric(8, 4), default=0.00)
     pis_valor = Column(Numeric(12, 2), default=0.00)
     
     # COFINS
-    cofins_cst = Column(String(100), nullable=True)
+    cofins_cst = Column(String(255), nullable=True)
     cofins_base_calculo = Column(Numeric(12, 2), default=0.00)
     cofins_aliquota = Column(Numeric(8, 4), default=0.00)
     cofins_valor = Column(Numeric(12, 2), default=0.00)
