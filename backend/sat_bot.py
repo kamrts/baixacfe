@@ -178,7 +178,9 @@ class SATBot:
             btn_certificado = page.locator("a[id*='imgCertificado'], a[id*='lnkLoginCertificado'], a.eCNPJ, input[id*='btnCertificado']")
             if await btn_certificado.count() > 0:
                 self.log("Identificado botão de login por certificado. Acionando...")
-                await btn_certificado.first.click()
+                # CORREÇÃO: Usar no_wait_after=True para não esperar navegação
+                # O popup de seleção de certificado do Windows impede a navegação de completar
+                await btn_certificado.first.click(no_wait_after=True)
             
             # Como a seleção do certificado A3 exige interação do usuário (popup do Windows),
             # nós aguardamos até 60 segundos monitorando a URL.
