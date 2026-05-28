@@ -227,6 +227,7 @@ class SATBotIsolated:
             
             # Número do CF-e
             num_text = await self._extrair_campo_por_titulo(page, "Número do CF-e", chave)
+            self.log(f"[DEBUG] Campo 'Número do CF-e' extraído: {num_text}")
             if num_text:
                 num_clean = re.sub(r"\D", "", num_text)
                 # Validar que não é a chave completa (44 dígitos)
@@ -240,8 +241,10 @@ class SATBotIsolated:
             
             # Valor Total do CF-e
             val_text = await self._extrair_campo_por_titulo(page, "Valor Total do CF-e", chave)
+            self.log(f"[DEBUG] Campo 'Valor Total do CF-e' extraído: {val_text}")
             if not val_text:
                 val_text = await self._extrair_campo_por_titulo(page, "Valor Total", chave)
+                self.log(f"[DEBUG] Campo 'Valor Total' (fallback) extraído: {val_text}")
             if val_text:
                 val_clean = val_text.replace("R$", "").replace(".", "").replace(",", ".").strip()
                 if val_clean and len(val_clean) < 20:
@@ -256,6 +259,7 @@ class SATBotIsolated:
             
             # Data/Hora Emissão
             datetime_text = await self._extrair_campo_por_titulo(page, "Data/Hora de Emissão", chave)
+            self.log(f"[DEBUG] Campo 'Data/Hora de Emissão' extraído: {datetime_text}")
             if not datetime_text:
                 datetime_text = await self._extrair_campo_por_titulo(page, "Data de Emissão", chave)
             if datetime_text:
@@ -272,31 +276,37 @@ class SATBotIsolated:
             # EMITENTE - já está na aba inicial CF-e
             # CNPJ
             emit_cnpj_text = await self._extrair_campo_por_titulo(page, "CNPJ", chave)
+            self.log(f"[DEBUG] Campo 'CNPJ' extraído: {emit_cnpj_text}")
             cfe_data["cnpj_emitente"] = re.sub(r"\D", "", emit_cnpj_text) if emit_cnpj_text else chave[6:20]
             
             # Nome / Razão Social
             emit_nome_text = await self._extrair_campo_por_titulo(page, "Nome / Razão Social", chave)
+            self.log(f"[DEBUG] Campo 'Nome / Razão Social' extraído: {emit_nome_text}")
             if not emit_nome_text:
                 emit_nome_text = await self._extrair_campo_por_titulo(page, "Razão Social", chave)
             cfe_data["nome_emitente"] = emit_nome_text.strip() if emit_nome_text else "Emitente Desconhecido"
             
             # Inscrição Estadual
             emit_ie_text = await self._extrair_campo_por_titulo(page, "Inscrição Estadual", chave)
+            self.log(f"[DEBUG] Campo 'Inscrição Estadual' extraído: {emit_ie_text}")
             cfe_data["inscricao_estadual"] = re.sub(r"\D", "", emit_ie_text) if emit_ie_text else None
             
             # UF
             uf_text = await self._extrair_campo_por_titulo(page, "UF", chave)
+            self.log(f"[DEBUG] Campo 'UF' extraído: {uf_text}")
             cfe_data["uf_emitente"] = uf_text.strip() if uf_text else "SP"
             
             # DESTINATÁRIO - também está na aba inicial CF-e
             # CPF / CNPJ
             dest_doc_text = await self._extrair_campo_por_titulo(page, "CPF / CNPJ", chave)
+            self.log(f"[DEBUG] Campo 'CPF / CNPJ' extraído: {dest_doc_text}")
             if not dest_doc_text:
                 dest_doc_text = await self._extrair_campo_por_titulo(page, "CPF", chave)
             cfe_data["destinatario_documento"] = re.sub(r"\D", "", dest_doc_text) if dest_doc_text else None
             
             # Nome Destinatário (pode ter label diferente)
             dest_nome_text = await self._extrair_campo_por_titulo(page, "Nome", chave)
+            self.log(f"[DEBUG] Campo 'Nome' (Destinatário) extraído: {dest_nome_text}")
             cfe_data["destinatario_nome"] = dest_nome_text.strip() if dest_nome_text else None
             
             self.log(f"Dados do cabeçalho extraídos: Número={cfe_data.get('numero_cfe')}, Valor={cfe_data.get('valor_total')}, CNPJ={cfe_data.get('cnpj_emitente')}")
@@ -540,20 +550,28 @@ class SATBotIsolated:
                     if encontrou:
                         # Raspar dados
                         cfe, itens = await self.raspar_dados_detalhados(page, chave)
-                        if cfe and itens:
-                            # Salvar no banco relacionamente
+                        
+                        # Log dos dados extraídos para debug
+                        self.log(f"[DEBUG] Dados CFe extraídos: {cfe}")
+                        self.log(f"[DEBUG] Total de itens extraídos: {len(itens) if itens else 0}")
+                        
+                        # Salvar no banco mesmo se não houver itens (itens pode estar vazio)
+                        if cfe:
                             with self.session_factory() as session:
-                                salvo = StateManager.save_cfe_to_db(session, cfe, itens)
+                                salvo = StateManager.save_cfe_to_db(session, cfe, itens or [])
                                 
                             if salvo:
                                 res_item["status"] = "CONCLUIDO"
-                                res_item["mensagem"] = f"Nota baixada e salva com sucesso ({len(itens)} itens)."
+                                res_item["mensagem"] = f"Nota baixada e salva com sucesso ({len(itens) if itens else 0} itens)."
+                                self.log(f"CF-e {chave} salvo no banco com sucesso!")
                             else:
                                 res_item["status"] = "ERRO_BANCO"
                                 res_item["mensagem"] = "Erro ao persistir dados da nota no banco SQL Server."
+                                self.log(f"Erro ao salvar CF-e {chave} no banco.", logging.ERROR)
                         else:
                             res_item["status"] = "ERRO_RASPAGEM"
-                            res_item["mensagem"] = "Falha ao ler os dados internos das abas da nota."
+                            res_item["mensagem"] = "Falha ao ler os dados do cabeçalho da nota."
+                            self.log(f"Dados do cabeçalho CF-e {chave} não foram extraídos.", logging.ERROR)
                             
                         # Fechar tela de detalhes e voltar à tela de busca sem erros
                         btn_voltar = page.locator("input[id*='btnVoltar']").first
