@@ -35,11 +35,11 @@ class Cfe(Base):
     __tablename__ = 'SAT_Cfe'
     
     chave = Column(String(44), primary_key=True)
-    numero_cfe = Column(Integer, nullable=False)
-    valor_total = Column(Numeric(10, 2), nullable=False)
-    data_hora_emissao = Column(DateTime, nullable=False)
+    numero_cfe = Column(Integer, nullable=False, default=0)
+    valor_total = Column(Numeric(10, 2), nullable=False, default=0.00)
+    data_hora_emissao = Column(DateTime, nullable=False, default=datetime.utcnow)
     cnpj_emitente = Column(String(14), nullable=False)
-    nome_emitente = Column(String(150), nullable=False)
+    nome_emitente = Column(String(150), nullable=False, default="Emitente Desconhecido")
     inscricao_estadual = Column(String(20), nullable=True)
     uf_emitente = Column(String(2), default="SP")
     
@@ -61,16 +61,16 @@ class CfeItem(Base):
     
     id = Column(Integer, primary_key=True, autoincrement=True)
     chave_cfe = Column(String(44), ForeignKey('SAT_Cfe.chave', ondelete='CASCADE'), nullable=False)
-    numero_item = Column(Integer, nullable=False)
-    codigo_produto = Column(String(60), nullable=False)
-    descricao = Column(String(120), nullable=False)
-    quantidade_comercial = Column(Numeric(12, 4), nullable=False)
-    unidade_comercial = Column(String(10), nullable=False)
-    valor_unitario = Column(Numeric(12, 4), nullable=False)
-    valor_bruto = Column(Numeric(12, 2), nullable=False)
-    valor_liquido = Column(Numeric(12, 2), nullable=False)  # Valor Líquido do Item
+    numero_item = Column(Integer, nullable=False, default=0)
+    codigo_produto = Column(String(60), nullable=False, default="N/A")
+    descricao = Column(String(120), nullable=False, default="Produto não identificado")
+    quantidade_comercial = Column(Numeric(12, 4), nullable=False, default=0.0)
+    unidade_comercial = Column(String(10), nullable=False, default="UN")
+    valor_unitario = Column(Numeric(12, 4), nullable=False, default=0.0)
+    valor_bruto = Column(Numeric(12, 2), nullable=False, default=0.0)
+    valor_liquido = Column(Numeric(12, 2), nullable=False, default=0.0)  # Valor Líquido do Item
     valor_desconto = Column(Numeric(12, 2), default=0.00)
-    cfop = Column(String(4), nullable=False)
+    cfop = Column(String(4), nullable=False, default="0000")
     ncm = Column(String(8), nullable=True)
     cest = Column(String(7), nullable=True)
     gtin = Column(String(14), nullable=True)
