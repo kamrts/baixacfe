@@ -206,195 +206,100 @@ class SATBotIsolated:
     async def raspar_dados_detalhados(self, page: Page, chave: str) -> Tuple[Optional[Dict[str, Any]], List[Dict[str, Any]]]:
         """
         Efetua a raspagem completa de dados do cupom fiscal.
-        Navega pelas abas internas (CF-e, Emitente, Destinatário e Produtos/Serviços) e coleta cabeçalho e todos os itens.
+        Na aba CF-e já estão todas as informações de emitente e destinatário.
+        Depois navega para aba Produtos/Serviços para coletar os itens.
         """
         cfe_data = {}
         itens_data = []
         
         try:
-            # 1. PASSO 5 — Extração de Dados da Aba "CF-e" (Cabeçalho)
-            # Clicar na aba CF-e usando seletor correto (input type="submit")
-            seletor_aba_cfe = "#conteudo_tabCfe, input[id='conteudo_tabCfe']"
-            try:
-                await page.wait_for_selector(seletor_aba_cfe, timeout=60000)
-                tab_cfe = page.locator(seletor_aba_cfe).first
-                if await tab_cfe.count() > 0:
-                    await tab_cfe.click()
-                    await page.wait_for_timeout(2000)
-                    await page.wait_for_load_state("networkidle")
-            except Exception as e:
-                self.log(f"Aba CF-e já pode estar selecionada: {e}", logging.WARNING)
-                
-            # Mapear e extrair dados usando seletores semânticos resilientes
+            # Aguardar página carregar completamente
+            await page.wait_for_load_state("networkidle")
+            await page.wait_for_timeout(2000)
+            
+            # Capturar screenshot inicial para debug
+            evidences_dir = Path(__file__).resolve().parent.parent / "logs" / "evidencias"
+            evidences_dir.mkdir(parents=True, exist_ok=True)
+            await page.screenshot(path=str(evidences_dir / f"debug_inicial_{chave[:20]}.png"))
+            
+            # Mapear e extrair dados - todas as informações estão na aba inicial CF-e
             cfe_data["chave"] = chave
             
-            # CORREÇÃO 1 — Número do CF-e com validação e timeout aumentado
-            # Usar seletor específico para evitar pegar a chave completa
-            try:
-                # Tentar extrair pelo título específico primeiro
-                num_text = await self._extrair_campo_por_titulo(page, "Número do CF-e", chave)
-                if not num_text:
-                    # Fallback: usar ID específico do label
-                    seletor_numero_especifico = "span[id*='lblNumeroCFe'], span[id*='lblNumero']"
-                    locator_numero = page.locator(seletor_numero_especifico).first
-                    if await locator_numero.count() > 0:
-                        num_text = await locator_numero.inner_text(timeout=60000)
+            # Número do CF-e
+            num_text = await self._extrair_campo_por_titulo(page, "Número do CF-e", chave)
+            if num_text:
+                num_clean = re.sub(r"\D", "", num_text)
                 # Validar que não é a chave completa (44 dígitos)
-                if num_text:
-                    num_clean = re.sub(r"\D", "", num_text)
-                    if len(num_clean) == 44:
-                        # Pegou a chave por engano, tentar outro seletor
-                        self.log(f"Seletor pegou chave completa, tentando alternativa para {chave}", logging.WARNING)
-                        num_text = None
-                cfe_data["numero_cfe"] = int(re.sub(r"\D", "", num_text)) if num_text and len(re.sub(r"\D", "", num_text)) < 20 else 0
-            except Exception as e:
-                self.log(f"Timeout ao extrair Número CF-e para {chave}: {e}", logging.WARNING)
-                # Capturar evidências de erro
-                evidences_dir = Path(__file__).resolve().parent.parent / "logs" / "evidencias"
-                evidences_dir.mkdir(parents=True, exist_ok=True)
-                await page.screenshot(path=str(evidences_dir / f"erro_{chave}.png"))
-                html = await page.content()
-                with open(str(evidences_dir / f"erro_{chave}.html"), "w", encoding="utf-8") as f:
-                    f.write(html)
+                if len(num_clean) < 20:
+                    cfe_data["numero_cfe"] = int(num_clean) if num_clean else 0
+                else:
+                    self.log(f"Número CF-e parece ser chave completa, ignorando: {num_text}", logging.WARNING)
+                    cfe_data["numero_cfe"] = 0
+            else:
                 cfe_data["numero_cfe"] = 0
             
-            # CORREÇÃO 2 — Captura dos campos principais com validação
             # Valor Total do CF-e
             val_text = await self._extrair_campo_por_titulo(page, "Valor Total do CF-e", chave)
             if not val_text:
                 val_text = await self._extrair_campo_por_titulo(page, "Valor Total", chave)
-            if not val_text:
-                # Fallback: usar ID específico
-                locator_val = page.locator("span[id*='lblValorTotalCFe'], span[id*='lblValorTotal']").first
-                if await locator_val.count() > 0:
-                    val_text = await locator_val.inner_text(timeout=10000)
             if val_text:
-                # Limpar e validar que é um valor monetário
                 val_clean = val_text.replace("R$", "").replace(".", "").replace(",", ".").strip()
-                # Verificar se parece um valor monetário (não a chave)
                 if val_clean and len(val_clean) < 20:
                     try:
                         cfe_data["valor_total"] = float(val_clean)
                     except ValueError:
-                        self.log(f"Valor Total inválido para {chave}: {val_text}", logging.WARNING)
                         cfe_data["valor_total"] = 0.00
                 else:
                     cfe_data["valor_total"] = 0.00
             else:
                 cfe_data["valor_total"] = 0.00
             
-            # Data/Hora Emissão (ex: 27/05/2026 15:30:22)
+            # Data/Hora Emissão
             datetime_text = await self._extrair_campo_por_titulo(page, "Data/Hora de Emissão", chave)
             if not datetime_text:
-                datetime_text = await self._extrair_texto_seguro(
-                    page,
-                    "span[id*='lblDataHoraEmissao']",
-                    chave,
-                    "Data/Hora de Emissão"
-                )
+                datetime_text = await self._extrair_campo_por_titulo(page, "Data de Emissão", chave)
             if datetime_text:
                 try:
                     cfe_data["data_hora_emissao"] = datetime.strptime(datetime_text.strip(), "%d/%m/%Y %H:%M:%S")
                 except ValueError:
-                    cfe_data["data_hora_emissao"] = datetime.now()
+                    try:
+                        cfe_data["data_hora_emissao"] = datetime.strptime(datetime_text.strip(), "%d/%m/%Y")
+                    except ValueError:
+                        cfe_data["data_hora_emissao"] = datetime.now()
             else:
                 cfe_data["data_hora_emissao"] = datetime.now()
             
-            # Clicar na aba Emitente para extrair CNPJ, Nome/Razão Social, IE e UF
-            seletor_aba_emitente = "#conteudo_tabEmitente, input[id='conteudo_tabEmitente']"
-            try:
-                await page.wait_for_selector(seletor_aba_emitente, timeout=60000)
-                tab_emitente = page.locator(seletor_aba_emitente).first
-                if await tab_emitente.count() > 0:
-                    await tab_emitente.click()
-                    await page.wait_for_timeout(2000)
-                    await page.wait_for_load_state("networkidle")
-            except Exception as e:
-                self.log(f"Erro ao clicar na aba Emitente: {e}", logging.WARNING)
-                
-            # Emitente CNPJ
+            # EMITENTE - já está na aba inicial CF-e
+            # CNPJ
             emit_cnpj_text = await self._extrair_campo_por_titulo(page, "CNPJ", chave)
-            if not emit_cnpj_text:
-                emit_cnpj_text = await self._extrair_texto_seguro(
-                    page,
-                    "span[id*='lblCnpjEmitente'], span[id*='lblCnpj']",
-                    chave,
-                    "CNPJ"
-                )
             cfe_data["cnpj_emitente"] = re.sub(r"\D", "", emit_cnpj_text) if emit_cnpj_text else chave[6:20]
             
-            # Nome / Razão Social do Emitente
+            # Nome / Razão Social
             emit_nome_text = await self._extrair_campo_por_titulo(page, "Nome / Razão Social", chave)
             if not emit_nome_text:
                 emit_nome_text = await self._extrair_campo_por_titulo(page, "Razão Social", chave)
-            if not emit_nome_text:
-                emit_nome_text = await self._extrair_texto_seguro(
-                    page,
-                    "span[id*='lblRazaoSocialEmitente'], span[id*='lblRazaoSocial']",
-                    chave,
-                    "Nome / Razão Social"
-                )
             cfe_data["nome_emitente"] = emit_nome_text.strip() if emit_nome_text else "Emitente Desconhecido"
             
             # Inscrição Estadual
             emit_ie_text = await self._extrair_campo_por_titulo(page, "Inscrição Estadual", chave)
-            if not emit_ie_text:
-                emit_ie_text = await self._extrair_texto_seguro(
-                    page,
-                    "span[id*='lblIeEmitente'], span[id*='lblInscricaoEstadual']",
-                    chave,
-                    "Inscrição Estadual"
-                )
             cfe_data["inscricao_estadual"] = re.sub(r"\D", "", emit_ie_text) if emit_ie_text else None
             
             # UF
             uf_text = await self._extrair_campo_por_titulo(page, "UF", chave)
-            if not uf_text:
-                uf_text = await self._extrair_texto_seguro(
-                    page,
-                    "span[id*='lblUf'], span[id*='lblUF']",
-                    chave,
-                    "UF"
-                )
             cfe_data["uf_emitente"] = uf_text.strip() if uf_text else "SP"
             
-            # Clicar na aba Destinatário para extrair CPF/CNPJ e Nome/Razão Social
-            seletor_aba_destinatario = "#conteudo_tabDestinatario, input[id='conteudo_tabDestinatario']"
-            try:
-                await page.wait_for_selector(seletor_aba_destinatario, timeout=60000)
-                tab_destinatario = page.locator(seletor_aba_destinatario).first
-                if await tab_destinatario.count() > 0:
-                    await tab_destinatario.click()
-                    await page.wait_for_timeout(2000)
-                    await page.wait_for_load_state("networkidle")
-            except Exception as e:
-                self.log(f"Erro ao clicar na aba Destinatário: {e}", logging.WARNING)
-            
-            # Destinatário CPF / CNPJ
+            # DESTINATÁRIO - também está na aba inicial CF-e
+            # CPF / CNPJ
             dest_doc_text = await self._extrair_campo_por_titulo(page, "CPF / CNPJ", chave)
             if not dest_doc_text:
-                dest_doc_text = await self._extrair_campo_por_titulo(page, "CNPJ", chave)
-            if not dest_doc_text:
                 dest_doc_text = await self._extrair_campo_por_titulo(page, "CPF", chave)
-            if not dest_doc_text:
-                dest_doc_text = await self._extrair_texto_seguro(
-                    page,
-                    "span[id*='lblCnpjCpfDestinatario'], span[id*='lblCpfCnpjDestinatario']",
-                    chave,
-                    "CPF / CNPJ Destinatário"
-                )
             cfe_data["destinatario_documento"] = re.sub(r"\D", "", dest_doc_text) if dest_doc_text else None
             
-            # Destinatário Nome / Razão Social
-            dest_nome_text = await self._extrair_campo_por_titulo(page, "Nome / Razão Social", chave)
-            if not dest_nome_text:
-                dest_nome_text = await self._extrair_texto_seguro(
-                    page,
-                    "span[id*='lblRazaoSocialDestinatario'], span[id*='lblNomeDestinatario']",
-                    chave,
-                    "Nome / Razão Social Destinatário"
-                )
+            # Nome Destinatário (pode ter label diferente)
+            dest_nome_text = await self._extrair_campo_por_titulo(page, "Nome", chave)
             cfe_data["destinatario_nome"] = dest_nome_text.strip() if dest_nome_text else None
+            
+            self.log(f"Dados do cabeçalho extraídos: Número={cfe_data.get('numero_cfe')}, Valor={cfe_data.get('valor_total')}, CNPJ={cfe_data.get('cnpj_emitente')}")
             
             # CORREÇÃO 3 — Clicar obrigatoriamente na aba Produtos/Serviços
             # Usar seletor específico do input type="submit" conforme HTML fornecido
