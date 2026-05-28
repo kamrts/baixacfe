@@ -48,11 +48,17 @@ class StateManager:
         intervals = cls.split_date_range(start_date, end_date, max_days=2)
         added_count = 0
         
+        logger.info(f"[DEBUG] populate_queue chamado com {len(cnpjs)} CNPJs e {len(intervals)} intervalos de data")
+        logger.info(f"[DEBUG] Período: {start_date.strftime('%d/%m/%Y')} a {end_date.strftime('%d/%m/%Y')}")
+        
         for cnpj in cnpjs:
             cnpj_clean = "".join(filter(str.isdigit, cnpj))
             if not cnpj_clean:
+                logger.warning(f"[DEBUG] CNPJ inválido ignorado: {cnpj}")
                 continue
-                
+            
+            logger.info(f"[DEBUG] Processando CNPJ: {cnpj_clean}")
+            
             for start, end in intervals:
                 # Verificar duplicidade exata
                 exists = session.query(QueueProgress).filter(
@@ -70,14 +76,32 @@ class StateManager:
                     )
                     session.add(job)
                     added_count += 1
-                    
+                    logger.info(f"[DEBUG] Job criado: CNPJ={cnpj_clean}, Período={start.strftime('%d/%m')} a {end.strftime('%d/%m')}")
+                else:
+                    logger.info(f"[DEBUG] Job já existe (status={exists.status}): CNPJ={cnpj_clean}, Período={start.strftime('%d/%m')} a {end.strftime('%d/%m')}")
+                    # Se o job existente está CONCLUIDO, resetar para PENDENTE para reprocessar
+                    if exists.status == "CONCLUIDO":
+                        exists.status = "PENDENTE"
+                        exists.tentativas = 0
+                        exists.pagina_atual = 1
+                        exists.xmls_baixados = 0
+                        logger.info(f"[DEBUG] Job resetado para PENDENTE: ID={exists.id}")
+                        added_count += 1
+        
         session.commit()
-        logger.info(f"Fila populada com {added_count} novos blocos de consulta SAT.")
+        logger.info(f"Fila populada com {added_count} novos/resetados blocos de consulta SAT.")
         return added_count
 
     @staticmethod
     def get_next_job(session: Session) -> Optional[QueueProgress]:
         """Busca o próximo trabalho na fila (PENDENTE ou com erro com menos de 3 tentativas)."""
+        # Debug: Verificar quantos jobs existem em cada status
+        pendentes = session.query(QueueProgress).filter(QueueProgress.status == "PENDENTE").count()
+        em_andamento = session.query(QueueProgress).filter(QueueProgress.status == "EM_ANDAMENTO").count()
+        concluidos = session.query(QueueProgress).filter(QueueProgress.status == "CONCLUIDO").count()
+        erros = session.query(QueueProgress).filter(QueueProgress.status == "ERRO").count()
+        logger.info(f"[DEBUG] Estado da fila: PENDENTE={pendentes}, EM_ANDAMENTO={em_andamento}, CONCLUIDO={concluidos}, ERRO={erros}")
+        
         # Priorizar PENDENTE, depois tentar os com ERRO que não estouraram tentativas
         job = session.query(QueueProgress).filter(
             QueueProgress.status == "PENDENTE"
