@@ -346,70 +346,89 @@ class SATBotIsolated:
                 self.log(f"Tabela de produtos vazia ou não encontrada para a chave {chave}.", logging.WARNING)
                 return cfe_data, []
             
-            # CORREÇÃO 4 — Capturar TODOS os campos de produtos/serviços usando spans com IDs específicos
-            # A tabela usa spans com IDs no padrão: conteudo_grvProdutosServicos_lblProdutoServicoDesc_0
+            # CORREÇÃO 4 — Capturar TODOS os campos de produtos/serviços
+            # A tabela usa estrutura HTML padrão com <tr> e <td>
+            # Colunas (baseado no HTML fornecido):
+            # 0: Núm. | 1: Descrição | 2: Qtd. Comercial | 3: Unid. Comercial | 4: Valor Líquido do Item
+            # 5: Informações Adicionais | 6: Cód. Produto | 7: Cód. GTIN | 8: Cód. NCM
+            # 9: Código Especificador ST (CEST) | 10: CFOP | 11: Valor Unit. | 12: Valor Bruto
+            # 13: Regra de Cálculo | 14: Valor do Desconto | 15: Outras Despesas | 16: Rateio Desconto
+            # 17: Rateio Acréscimo | 18: Observações Fisco | 19: Origem Mercadoria | 20: Tributação ICMS
+            # 21: Cód. Situação Operação - Simples Nacional | 22+: Valor ICMS (possivelmente)
             
             # Contar número de itens pela quantidade de linhas (excluindo cabeçalho)
             num_itens = len(linhas_prod) - 1
-            self.log(f"Encontrados {num_itens} itens de produto para processar")
+            self.log(f"[DEBUG] Encontrados {num_itens} itens de produto para processar")
             
-            for idx in range(num_itens):
-                def parse_float(valor: str) -> float:
-                    if not valor or valor == "Não Informado":
-                        return 0.00
-                    try:
-                        return float(valor.replace(".", "").replace(",", ".").strip())
-                    except ValueError:
-                        return 0.00
-                
-                def parse_int(valor: str) -> int:
-                    if not valor or valor == "Não Informado":
-                        return 0
-                    try:
-                        return int(re.sub(r"\D", "", valor))
-                    except ValueError:
-                        return 0
-                
-                def limpar_valor(valor: str) -> Optional[str]:
-                    if not valor or valor.strip() == "Não Informado":
-                        return None
-                    return valor.strip()
-                
-                # Extrair cada campo usando o ID específico do span
-                async def get_span_value(campo_id: str) -> Optional[str]:
-                    try:
-                        span = page.locator(f"#conteudo_grvProdutosServicos_{campo_id}_{idx}")
-                        if await span.count() > 0:
-                            return await span.inner_text(timeout=5000)
-                    except Exception:
-                        pass
+            def parse_float(valor: str) -> float:
+                if not valor or valor.strip() == "" or valor.strip() == "Não Informado":
+                    return 0.00
+                try:
+                    return float(valor.replace(".", "").replace(",", ".").strip())
+                except ValueError:
+                    return 0.00
+            
+            def parse_int(valor: str) -> int:
+                if not valor or valor.strip() == "" or valor.strip() == "Não Informado":
+                    return 0
+                try:
+                    return int(re.sub(r"\D", "", valor))
+                except ValueError:
+                    return 0
+            
+            def limpar_valor(valor: str) -> Optional[str]:
+                if not valor or valor.strip() == "" or valor.strip() == "Não Informado":
                     return None
-                
-                # CORREÇÃO 4 — Capturar TODOS os campos solicitados usando IDs corretos
-                item = {
-                    # Campos obrigatórios
-                    "numero_item": parse_int(await get_span_value("lblProdutoServicoNum")) or idx + 1,
-                    "descricao": limpar_valor(await get_span_value("lblProdutoServicoDesc")) or "",
-                    "quantidade_comercial": parse_float(await get_span_value("lblProdutoServicoQtd")),
-                    "unidade_comercial": limpar_valor(await get_span_value("lblProdutoServicoUnit")) or "UN",
-                    "valor_liquido": parse_float(await get_span_value("lblProdutoServicoIcmsValorLiquidoItem")),
-                    "codigo_produto": limpar_valor(await get_span_value("lblProdutoServicoCodigoProduto")) or "",
-                    # Campos adicionais solicitados na CORREÇÃO 4
-                    "gtin": limpar_valor(await get_span_value("lblProdutoServicoGtin")),
-                    "ncm": limpar_valor(await get_span_value("lblProdutoServicoNcm")),
-                    "cest": limpar_valor(await get_span_value("lblCest")),
-                    "cfop": limpar_valor(await get_span_value("lblProdutoServicoCFOP")) or "5929",
-                    "valor_unitario": parse_float(await get_span_value("lblProdutoServicoValorUnit")),
-                    "valor_bruto": parse_float(await get_span_value("lblProdutoServicoValorBruto")),
-                    "valor_desconto": parse_float(await get_span_value("lblProdutoServicoValorDesconto")),
-                    "observacoes_fisco": limpar_valor(await get_span_value("lblProdutoServicoObservacaoFisco")),
-                    "origem_mercadoria": limpar_valor(await get_span_value("lblProdutoServicoOrigemMercadoria")),
-                    "tributacao_icms": limpar_valor(await get_span_value("lblProdutoServicoTributacaoIcms")),
-                    "situacao_simples_nacional": limpar_valor(await get_span_value("lblProdutoServicoCodigoSituacaoOperacaoSimplesNacional")),
-                    "valor_icms": parse_float(await get_span_value("lblProdutoServicoValorIcms")),
-                }
+                return valor.strip()
+            
+            # Processar cada linha da tabela (ignorando cabeçalho - linha 0)
+            for idx, linha in enumerate(linhas_prod[1:]):
+                try:
+                    # Extrair todas as colunas <td> da linha
+                    colunas = await linha.locator("td").all_inner_texts()
                     
-                itens_data.append(item)
+                    if not colunas or len(colunas) < 5:
+                        self.log(f"[DEBUG] Linha {idx + 1} com poucas colunas ({len(colunas) if colunas else 0}), ignorando", logging.WARNING)
+                        continue
+                    
+                    self.log(f"[DEBUG] Linha {idx + 1}: {len(colunas)} colunas encontradas")
+                    
+                    # Extrair campos por posição (baseado na estrutura do cabeçalho)
+                    item = {
+                        "numero_item": parse_int(colunas[0]) if len(colunas) > 0 else idx + 1,
+                        "descricao": limpar_valor(colunas[1]) if len(colunas) > 1 else "",
+                        "quantidade_comercial": parse_float(colunas[2]) if len(colunas) > 2 else 0.00,
+                        "unidade_comercial": limpar_valor(colunas[3]) if len(colunas) > 3 else "UN",
+                        "valor_liquido": parse_float(colunas[4]) if len(colunas) > 4 else 0.00,
+                        "info_adicional": limpar_valor(colunas[5]) if len(colunas) > 5 else None,
+                        "codigo_produto": limpar_valor(colunas[6]) if len(colunas) > 6 else "",
+                        "gtin": limpar_valor(colunas[7]) if len(colunas) > 7 else None,
+                        "ncm": limpar_valor(colunas[8]) if len(colunas) > 8 else None,
+                        "cest": limpar_valor(colunas[9]) if len(colunas) > 9 else None,
+                        "cfop": limpar_valor(colunas[10]) if len(colunas) > 10 else "5929",
+                        "valor_unitario": parse_float(colunas[11]) if len(colunas) > 11 else 0.00,
+                        "valor_bruto": parse_float(colunas[12]) if len(colunas) > 12 else 0.00,
+                        "regra_calculo": limpar_valor(colunas[13]) if len(colunas) > 13 else None,
+                        "valor_desconto": parse_float(colunas[14]) if len(colunas) > 14 else 0.00,
+                        "outras_despesas": parse_float(colunas[15]) if len(colunas) > 15 else 0.00,
+                        "rateio_desconto": parse_float(colunas[16]) if len(colunas) > 16 else 0.00,
+                        "rateio_acrescimo": parse_float(colunas[17]) if len(colunas) > 17 else 0.00,
+                        "observacoes_fisco": limpar_valor(colunas[18]) if len(colunas) > 18 else None,
+                        "origem_mercadoria": limpar_valor(colunas[19]) if len(colunas) > 19 else None,
+                        "tributacao_icms": limpar_valor(colunas[20]) if len(colunas) > 20 else None,
+                        "situacao_simples_nacional": limpar_valor(colunas[21]) if len(colunas) > 21 else None,
+                        "valor_icms": parse_float(colunas[22]) if len(colunas) > 22 else 0.00,
+                    }
+                    
+                    # Log do primeiro item para debug
+                    if idx == 0:
+                        self.log(f"[DEBUG] Primeiro item extraído: {item}")
+                    
+                    itens_data.append(item)
+                    
+                except Exception as e:
+                    self.log(f"[DEBUG] Erro ao processar linha {idx + 1}: {e}", logging.WARNING)
+                    continue
                 
             self.log(f"Chave {chave} raspada com sucesso. Encontrados {len(itens_data)} itens de produto.")
             return cfe_data, itens_data
