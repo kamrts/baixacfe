@@ -320,44 +320,65 @@ class SATBot:
             self.log(f"Erro ao alternar CNPJ: {e}", logging.ERROR)
             return False
 
+    URL_PARAMETROS_EQUIPAMENTO = "https://satsp.fazenda.sp.gov.br/COMSAT/Private/ConsultarParametrosEquipamentoSAT/PesquisarParametrosEquipamentoSAT.aspx"
+
     async def capturar_series_sat(self, page: Page) -> List[str]:
-        """Navega em Parametrização -> Equipamento e extrai os números de série SAT ativos."""
+        """
+        Navega para a página de Parâmetros do Equipamento SAT e extrai os números de série.
+        URL: https://satsp.fazenda.sp.gov.br/COMSAT/Private/ConsultarParametrosEquipamentoSAT/PesquisarParametrosEquipamentoSAT.aspx
+        Os números de série ficam na tabela conteudo_grvSoftwares com IDs: conteudo_grvSoftwares_lblNumeroSerie_0, _1, etc.
+        """
         self.log("Iniciando captura de números de série SAT...")
         series = []
         try:
-            # Navegação no menu superior dinâmico (Hover -> Click)
-            # Parametrização -> Equipamento -> Consultar Parâmetros Equipamento SAT
-            await page.locator("a:has-text('Parametrização')").hover()
-            await asyncio.sleep(0.5)
-            await page.locator("a:has-text('Equipamento')").hover()
-            await asyncio.sleep(0.5)
-            await page.locator("a:has-text('Consultar Parâmetros')").click()
+            # Acesso direto via URL - mais confiável que navegação por menu
+            self.log(f"Navegando para: {self.URL_PARAMETROS_EQUIPAMENTO}")
+            await page.goto(self.URL_PARAMETROS_EQUIPAMENTO)
             await page.wait_for_load_state("networkidle")
             
-            # Clicar em Pesquisar para trazer todos
-            btn_pesquisar = page.locator("input[id*='btnPesquisar']")
+            # Aguardar carregamento da tabela
+            await page.wait_for_timeout(2000)
+            
+            # Clicar em Pesquisar para trazer todos os equipamentos
+            btn_pesquisar = page.locator("input[id*='btnPesquisar'], #conteudo_btnPesquisar")
             if await btn_pesquisar.count() > 0:
-                await btn_pesquisar.click()
+                await btn_pesquisar.first.click()
                 await page.wait_for_load_state("networkidle")
+                await page.wait_for_timeout(3000)
                 
-            # Ler tabela de resultados
-            # Geralmente é uma GridView de id grvEquipamento ou table
-            linhas = await page.locator("table[id*='grvEquipamento'] tr, table[id*='grid'] tr").all()
-            for linha in linhas[1:]:  # Ignorar cabeçalho
-                colunas = await linha.locator("td").all_inner_texts()
-                if len(colunas) > 1:
-                    # O número de série costuma ser a primeira ou segunda coluna de texto numérico com 9 dígitos
-                    for col in colunas:
-                        col_clean = col.strip()
-                        if col_clean.isdigit() and len(col_clean) == 9:
-                            series.append(col_clean)
-                            
-            # Remover duplicados
-            series = list(set(series))
-            self.log(f"Encontrados {len(series)} equipamentos SAT ativos: {series}")
+            # Extrair números de série usando os IDs específicos da tabela conteudo_grvSoftwares
+            # Os spans seguem o padrão: conteudo_grvSoftwares_lblNumeroSerie_0, _1, _2, etc.
+            idx = 0
+            while True:
+                seletor_serie = f"#conteudo_grvSoftwares_lblNumeroSerie_{idx}, a[id='conteudo_grvSoftwares_lblNumeroSerie_{idx}']"
+                locator_serie = page.locator(seletor_serie)
+                
+                if await locator_serie.count() == 0:
+                    break
+                    
+                try:
+                    numero_serie = await locator_serie.inner_text(timeout=5000)
+                    numero_serie = numero_serie.strip()
+                    if numero_serie:
+                        # Remover hífen se existir (ex: 000563582-96 -> 00056358296)
+                        numero_serie_limpo = numero_serie.replace("-", "")
+                        series.append(numero_serie_limpo)
+                        self.log(f"Número de série encontrado: {numero_serie}")
+                except Exception as e:
+                    self.log(f"Erro ao extrair série índice {idx}: {e}", logging.WARNING)
+                    
+                idx += 1
+                
+            # Remover duplicados mantendo a ordem
+            series = list(dict.fromkeys(series))
+            self.log(f"Encontrados {len(series)} equipamentos SAT: {series}")
             return series
         except Exception as e:
             self.log(f"Erro ao capturar números de série: {e}", logging.ERROR)
+            # Capturar evidência em caso de erro
+            evidences_dir = Path(__file__).resolve().parent.parent / "logs" / "evidencias"
+            evidences_dir.mkdir(parents=True, exist_ok=True)
+            await page.screenshot(path=str(evidences_dir / "erro_captura_series.png"))
             return []
 
     URL_CONSULTA_LOTES = "https://satsp.fazenda.sp.gov.br/COMSAT/Private/ConsultarLotesEnviados/PesquisaLotesEnviados.aspx"
