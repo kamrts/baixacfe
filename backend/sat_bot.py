@@ -225,6 +225,11 @@ class SATBot:
         Detecta e fecha qualquer caixa de diálogo ou modal de alerta visível na página.
         """
         try:
+            # Verificar se a página ainda está ativa
+            if page.is_closed():
+                self.log("Página já foi fechada, ignorando fechar_dialogos_alerta", logging.WARNING)
+                return False
+            
             # Seletores para diálogos jQuery UI ou caixas de diálogo genéricas (com role="dialog")
             seletor_dialogo = "div.ui-dialog, div[role='dialog'], .modal-dialog"
             dialogo = page.locator(seletor_dialogo).first
@@ -266,6 +271,11 @@ class SATBot:
         """
         self.log(f"Selecionando CNPJ ativo: {cnpj}")
         try:
+            # Verificar se a página ainda está ativa
+            if page.is_closed():
+                self.log("Página foi fechada antes de alternar CNPJ", logging.ERROR)
+                return False
+            
             # Tenta fechar qualquer diálogo pendente antes de alternar
             await self.fechar_dialogos_alerta(page)
             
@@ -634,9 +644,20 @@ class SATBot:
                     self.log("Falha na autenticação inicial. Parando robô.", logging.ERROR)
                     self.is_running = False
                     return
+                
+                self.log("[DEBUG] Login concluído com sucesso. Iniciando processamento da fila...")
                     
                 # Loop infinito de processamento da fila persistente
                 while self.is_running:
+                    # Verificar se página ainda está ativa
+                    if page.is_closed():
+                        self.log("[DEBUG] Página foi fechada. Tentando recriar...", logging.WARNING)
+                        page = await self.context.new_page()
+                        page.on("dialog", lambda d: asyncio.create_task(handle_dialog(d)))
+                        if not await self.realizar_login(page):
+                            self.log("Falha ao reautenticar após página fechada.", logging.ERROR)
+                            break
+                    
                     # Obter próxima atividade no banco
                     with self.session_factory() as session:
                         job = StateManager.get_next_job(session)
@@ -650,7 +671,8 @@ class SATBot:
                         data_ini = job.periodo_inicio
                         data_fim = job.periodo_fim
                         pagina_alvo = job.pagina_atual
-                        
+                    
+                    self.log(f"[DEBUG] Job carregado: ID={self.current_job_id}, CNPJ={cnpj}, Serie={serie}, DataIni={data_ini}, DataFim={data_fim}")
                     self.log(f"Iniciando Trabalho ID {self.current_job_id} | CNPJ: {cnpj} | Série: {serie or 'A capturar'} | Período: {data_ini.strftime('%d/%m')} a {data_fim.strftime('%d/%m')}")
                     
                     try:
