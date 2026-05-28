@@ -38,7 +38,7 @@ class Cfe(Base):
     numero_cfe = Column(Integer, nullable=False, default=0)
     valor_total = Column(Numeric(10, 2), nullable=False, default=0.00)
     data_hora_emissao = Column(DateTime, nullable=False, default=datetime.utcnow)
-    cnpj_emitente = Column(String(14), nullable=False)
+    cnpj_emitente = Column(String(14), nullable=False, default="00000000000000")
     nome_emitente = Column(String(150), nullable=False, default="Emitente Desconhecido")
     inscricao_estadual = Column(String(20), nullable=True)
     uf_emitente = Column(String(2), default="SP")
@@ -68,17 +68,40 @@ class CfeItem(Base):
     unidade_comercial = Column(String(10), nullable=False, default="UN")
     valor_unitario = Column(Numeric(12, 4), nullable=False, default=0.0)
     valor_bruto = Column(Numeric(12, 2), nullable=False, default=0.0)
-    valor_liquido = Column(Numeric(12, 2), nullable=False, default=0.0)  # Valor Líquido do Item
+    valor_liquido = Column(Numeric(12, 2), nullable=False, default=0.0)
     valor_desconto = Column(Numeric(12, 2), default=0.00)
     cfop = Column(String(4), nullable=False, default="0000")
     ncm = Column(String(8), nullable=True)
     cest = Column(String(7), nullable=True)
     gtin = Column(String(14), nullable=True)
-    origem_mercadoria = Column(Integer, nullable=True)
-    tributacao_icms = Column(String(10), nullable=True)  # CST ou CSOSN
+    origem_mercadoria = Column(String(100), nullable=True)  # Texto descritivo da origem
+    tributacao_icms = Column(String(100), nullable=True)  # CST ou CSOSN com descrição
     situacao_simples_nacional = Column(String(10), nullable=True)
     valor_icms = Column(Numeric(12, 2), default=0.00)
     observacoes_fisco = Column(Text, nullable=True)
+    
+    # Campos adicionais extraídos do portal SAT
+    info_adicional = Column(Text, nullable=True)
+    regra_calculo = Column(String(10), nullable=True)
+    outras_despesas = Column(Numeric(12, 2), default=0.00)
+    rateio_desconto = Column(Numeric(12, 2), default=0.00)
+    rateio_acrescimo = Column(Numeric(12, 2), default=0.00)
+    aliquota_efetiva = Column(Numeric(8, 4), default=0.00)
+    
+    # PIS
+    pis_cst = Column(String(100), nullable=True)
+    pis_base_calculo = Column(Numeric(12, 2), default=0.00)
+    pis_aliquota = Column(Numeric(8, 4), default=0.00)
+    pis_valor = Column(Numeric(12, 2), default=0.00)
+    
+    # COFINS
+    cofins_cst = Column(String(100), nullable=True)
+    cofins_base_calculo = Column(Numeric(12, 2), default=0.00)
+    cofins_aliquota = Column(Numeric(8, 4), default=0.00)
+    cofins_valor = Column(Numeric(12, 2), default=0.00)
+    
+    # Tributos aproximados
+    valor_aproximado_tributos = Column(Numeric(12, 2), default=0.00)
 
     cfe = relationship("Cfe", back_populates="itens")
 
