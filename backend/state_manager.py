@@ -148,6 +148,9 @@ class StateManager:
         Utiliza UPSERT com base na chave principal.
         """
         try:
+            # Log detalhado para debug
+            logger.info(f"[DEBUG] Salvando CF-e: chave={cfe_data.get('chave')}, numero={cfe_data.get('numero_cfe')}, valor={cfe_data.get('valor_total')}")
+            
             # 1. Verificar se já existe
             cfe = session.query(Cfe).filter(Cfe.chave == cfe_data["chave"]).first()
             
@@ -171,10 +174,12 @@ class StateManager:
                 session.add(cfe_item)
                 
             session.commit()
+            logger.info(f"[DEBUG] CF-e {cfe_data.get('chave')} salvo com sucesso com {len(items_data)} itens")
             return True
         except Exception as e:
             session.rollback()
-            logger.error(f"Erro ao salvar CF-e {cfe_data.get('chave')} no banco: {e}")
+            logger.error(f"Erro ao salvar CF-e {cfe_data.get('chave')} no banco: {type(e).__name__}: {e}")
+            logger.error(f"[DEBUG] Dados CFe que falharam: {cfe_data}")
             return False
 
     @staticmethod

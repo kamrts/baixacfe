@@ -157,11 +157,24 @@ class SATBotIsolated:
     async def _extrair_campo_por_titulo(self, page: Page, titulo: str, chave: str) -> Optional[str]:
         """
         Extrai valor de um campo baseado na estrutura HTML real do SAT SP.
-        Estrutura: <span class="TituloCampo">Label:</span> seguido de <span class="ValorCampo">Valor</span>
-        Ou dentro de div.LinhaCampo contendo ambos os spans.
+        Estrutura real do portal:
+        <div class="alinhamentoLinha">
+            <div class="TituloLinhaCampo">
+                <span class="TituloCampo">Label: </span>
+            </div>
+            <span id="conteudo_lblXxx" class="ValorCampo">Valor</span>
+        </div>
         """
         try:
-            # Estratégia 1: Procurar dentro da mesma div.LinhaCampo
+            # Estratégia 1 (PRINCIPAL): Usar div.alinhamentoLinha conforme estrutura real do portal
+            seletor_alinhamento = f"div.alinhamentoLinha:has(span.TituloCampo:has-text('{titulo}')) span.ValorCampo"
+            locator_alinhamento = page.locator(seletor_alinhamento).first
+            if await locator_alinhamento.count() > 0:
+                valor = await locator_alinhamento.inner_text(timeout=10000)
+                if valor and valor.strip():
+                    return valor.strip()
+            
+            # Estratégia 2: Procurar dentro da mesma div.LinhaCampo (fallback)
             seletor_linha = f"div.LinhaCampo:has(span.TituloCampo:has-text('{titulo}')) span.ValorCampo"
             locator_linha = page.locator(seletor_linha).first
             if await locator_linha.count() > 0:
@@ -169,7 +182,15 @@ class SATBotIsolated:
                 if valor and valor.strip():
                     return valor.strip()
             
-            # Estratégia 2: Procurar irmão direto do TituloCampo
+            # Estratégia 3: Procurar irmão direto do TituloLinhaCampo
+            seletor_titulo_irmao = f"div.TituloLinhaCampo:has(span.TituloCampo:has-text('{titulo}')) ~ span.ValorCampo"
+            locator_titulo_irmao = page.locator(seletor_titulo_irmao).first
+            if await locator_titulo_irmao.count() > 0:
+                valor = await locator_titulo_irmao.inner_text(timeout=10000)
+                if valor and valor.strip():
+                    return valor.strip()
+            
+            # Estratégia 4: Procurar irmão direto do TituloCampo
             seletor_irmao = f"span.TituloCampo:has-text('{titulo}') + span.ValorCampo"
             locator_irmao = page.locator(seletor_irmao).first
             if await locator_irmao.count() > 0:
@@ -177,7 +198,7 @@ class SATBotIsolated:
                 if valor and valor.strip():
                     return valor.strip()
             
-            # Estratégia 3: Procurar no contexto de TituloLinhaCampo seguido de ValorLinhaCampo
+            # Estratégia 5: Procurar no contexto de TituloLinhaCampo seguido de ValorLinhaCampo
             seletor_titulo_linha = f"div.TituloLinhaCampo:has(span.TituloCampo:has-text('{titulo}')) + div.ValorLinhaCampo span.ValorCampo"
             locator_titulo_linha = page.locator(seletor_titulo_linha).first
             if await locator_titulo_linha.count() > 0:
@@ -185,11 +206,12 @@ class SATBotIsolated:
                 if valor and valor.strip():
                     return valor.strip()
                     
-            # Estratégia 4: XPath mais preciso - encontrar o span TituloCampo e pegar o próximo ValorCampo na mesma linha
+            # Estratégia 6: XPath mais abrangente - encontrar o span TituloCampo e subir ao container pai
             try:
-                elementos = await page.locator(f"span.TituloCampo:text-is('{titulo}:'), span.TituloCampo:text-is('{titulo}')").all()
+                elementos = await page.locator(f"span.TituloCampo:text-is('{titulo}:'), span.TituloCampo:text-is('{titulo}'), span.TituloCampo:has-text('{titulo}')").all()
                 for elem in elementos:
-                    parent = elem.locator("xpath=..")
+                    # Subir dois níveis (span -> div.TituloLinhaCampo -> div.alinhamentoLinha)
+                    parent = elem.locator("xpath=ancestor::div[contains(@class, 'alinhamentoLinha') or contains(@class, 'LinhaCampo')]")
                     valor_elem = parent.locator("span.ValorCampo").first
                     if await valor_elem.count() > 0:
                         valor = await valor_elem.inner_text(timeout=5000)
@@ -225,8 +247,18 @@ class SATBotIsolated:
             # Mapear e extrair dados - todas as informações estão na aba inicial CF-e
             cfe_data["chave"] = chave
             
-            # Número do CF-e
-            num_text = await self._extrair_campo_por_titulo(page, "Número do CF-e", chave)
+            # Número do CF-e - PRIMEIRO tentar pelo ID específico
+            num_text = None
+            try:
+                locator_num = page.locator("#conteudo_lblCfeNumero")
+                if await locator_num.count() > 0:
+                    num_text = await locator_num.inner_text(timeout=10000)
+            except Exception:
+                pass
+            
+            # Fallback para extração por título
+            if not num_text or not num_text.strip():
+                num_text = await self._extrair_campo_por_titulo(page, "Número do CF-e", chave)
             self.log(f"[DEBUG] Campo 'Número do CF-e' extraído: {num_text}")
             if num_text:
                 num_clean = re.sub(r"\D", "", num_text)
@@ -239,8 +271,18 @@ class SATBotIsolated:
             else:
                 cfe_data["numero_cfe"] = 0
             
-            # Valor Total do CF-e
-            val_text = await self._extrair_campo_por_titulo(page, "Valor Total do CF-e", chave)
+            # Valor Total do CF-e - PRIMEIRO tentar pelo ID específico
+            val_text = None
+            try:
+                locator_val = page.locator("#conteudo_lblCfeValorTotal")
+                if await locator_val.count() > 0:
+                    val_text = await locator_val.inner_text(timeout=10000)
+            except Exception:
+                pass
+            
+            # Fallback para extração por título
+            if not val_text or not val_text.strip():
+                val_text = await self._extrair_campo_por_titulo(page, "Valor Total do CF-e", chave)
             self.log(f"[DEBUG] Campo 'Valor Total do CF-e' extraído: {val_text}")
             if not val_text:
                 val_text = await self._extrair_campo_por_titulo(page, "Valor Total", chave)
@@ -257,8 +299,18 @@ class SATBotIsolated:
             else:
                 cfe_data["valor_total"] = 0.00
             
-            # Data/Hora Emissão
-            datetime_text = await self._extrair_campo_por_titulo(page, "Data/Hora de Emissão", chave)
+            # Data/Hora Emissão - PRIMEIRO tentar pelo ID específico
+            datetime_text = None
+            try:
+                locator_dt = page.locator("#conteudo_lblCfeDataHoraEmissao, #conteudo_lblDataHoraEmissao")
+                if await locator_dt.count() > 0:
+                    datetime_text = await locator_dt.inner_text(timeout=10000)
+            except Exception:
+                pass
+            
+            # Fallback para extração por título
+            if not datetime_text or not datetime_text.strip():
+                datetime_text = await self._extrair_campo_por_titulo(page, "Data/Hora de Emissão", chave)
             self.log(f"[DEBUG] Campo 'Data/Hora de Emissão' extraído: {datetime_text}")
             if not datetime_text:
                 datetime_text = await self._extrair_campo_por_titulo(page, "Data de Emissão", chave)
@@ -274,40 +326,117 @@ class SATBotIsolated:
                 cfe_data["data_hora_emissao"] = datetime.now()
             
             # EMITENTE - já está na aba inicial CF-e
-            # CNPJ
-            emit_cnpj_text = await self._extrair_campo_por_titulo(page, "CNPJ", chave)
-            self.log(f"[DEBUG] Campo 'CNPJ' extraído: {emit_cnpj_text}")
-            cfe_data["cnpj_emitente"] = re.sub(r"\D", "", emit_cnpj_text) if emit_cnpj_text else chave[6:20]
+            # CNPJ - PRIMEIRO tentar pelo ID específico
+            emit_cnpj_text = None
+            try:
+                locator_cnpj = page.locator("#conteudo_lblEmitenteCnpj")
+                if await locator_cnpj.count() > 0:
+                    emit_cnpj_text = await locator_cnpj.inner_text(timeout=10000)
+            except Exception:
+                pass
             
-            # Nome / Razão Social
-            emit_nome_text = await self._extrair_campo_por_titulo(page, "Nome / Razão Social", chave)
+            # Fallback para extração por título
+            if not emit_cnpj_text or not emit_cnpj_text.strip():
+                emit_cnpj_text = await self._extrair_campo_por_titulo(page, "CNPJ", chave)
+            self.log(f"[DEBUG] Campo 'CNPJ' extraído: {emit_cnpj_text}")
+            if emit_cnpj_text:
+                cnpj_limpo = re.sub(r"\D", "", emit_cnpj_text)
+                cfe_data["cnpj_emitente"] = cnpj_limpo if cnpj_limpo else chave[6:20]
+            else:
+                cfe_data["cnpj_emitente"] = chave[6:20]
+            
+            # Nome / Razão Social - PRIMEIRO tentar pelo ID específico
+            emit_nome_text = None
+            try:
+                locator_nome = page.locator("#conteudo_lblEmitenteNome")
+                if await locator_nome.count() > 0:
+                    emit_nome_text = await locator_nome.inner_text(timeout=10000)
+            except Exception:
+                pass
+            
+            # Fallback para extração por título
+            if not emit_nome_text or not emit_nome_text.strip():
+                emit_nome_text = await self._extrair_campo_por_titulo(page, "Nome / Razão Social", chave)
             self.log(f"[DEBUG] Campo 'Nome / Razão Social' extraído: {emit_nome_text}")
             if not emit_nome_text:
                 emit_nome_text = await self._extrair_campo_por_titulo(page, "Razão Social", chave)
             cfe_data["nome_emitente"] = emit_nome_text.strip() if emit_nome_text else "Emitente Desconhecido"
             
-            # Inscrição Estadual
-            emit_ie_text = await self._extrair_campo_por_titulo(page, "Inscrição Estadual", chave)
-            self.log(f"[DEBUG] Campo 'Inscrição Estadual' extraído: {emit_ie_text}")
-            cfe_data["inscricao_estadual"] = re.sub(r"\D", "", emit_ie_text) if emit_ie_text else None
+            # Inscrição Estadual - PRIMEIRO tentar pelo ID específico
+            emit_ie_text = None
+            try:
+                locator_ie = page.locator("#conteudo_lblEmitenteInscricaoEstatual")
+                if await locator_ie.count() > 0:
+                    emit_ie_text = await locator_ie.inner_text(timeout=10000)
+            except Exception:
+                pass
             
-            # UF
-            uf_text = await self._extrair_campo_por_titulo(page, "UF", chave)
+            # Fallback para extração por título
+            if not emit_ie_text or not emit_ie_text.strip():
+                emit_ie_text = await self._extrair_campo_por_titulo(page, "Inscrição Estadual", chave)
+            self.log(f"[DEBUG] Campo 'Inscrição Estadual' extraído: {emit_ie_text}")
+            if emit_ie_text:
+                ie_limpo = re.sub(r"\D", "", emit_ie_text)
+                cfe_data["inscricao_estadual"] = ie_limpo if ie_limpo else None
+            else:
+                cfe_data["inscricao_estadual"] = None
+            
+            # UF - PRIMEIRO tentar pelo ID específico
+            uf_text = None
+            try:
+                locator_uf = page.locator("#conteudo_lblEmitenteUf")
+                if await locator_uf.count() > 0:
+                    uf_text = await locator_uf.inner_text(timeout=10000)
+            except Exception:
+                pass
+            
+            # Fallback para extração por título
+            if not uf_text or not uf_text.strip():
+                uf_text = await self._extrair_campo_por_titulo(page, "UF", chave)
             self.log(f"[DEBUG] Campo 'UF' extraído: {uf_text}")
             cfe_data["uf_emitente"] = uf_text.strip() if uf_text else "SP"
             
             # DESTINATÁRIO - também está na aba inicial CF-e
-            # CPF / CNPJ
-            dest_doc_text = await self._extrair_campo_por_titulo(page, "CPF / CNPJ", chave)
+            # CPF / CNPJ - PRIMEIRO tentar pelo ID específico
+            dest_doc_text = None
+            try:
+                locator_dest_doc = page.locator("#conteudo_lblDestinatarioCnpj")
+                if await locator_dest_doc.count() > 0:
+                    dest_doc_text = await locator_dest_doc.inner_text(timeout=10000)
+            except Exception:
+                pass
+            
+            # Fallback para extração por título
+            if not dest_doc_text or not dest_doc_text.strip():
+                dest_doc_text = await self._extrair_campo_por_titulo(page, "CPF / CNPJ", chave)
             self.log(f"[DEBUG] Campo 'CPF / CNPJ' extraído: {dest_doc_text}")
             if not dest_doc_text:
                 dest_doc_text = await self._extrair_campo_por_titulo(page, "CPF", chave)
-            cfe_data["destinatario_documento"] = re.sub(r"\D", "", dest_doc_text) if dest_doc_text else None
+            # Tratar "Não Informado" como nulo
+            if dest_doc_text and dest_doc_text.strip().lower() != "não informado":
+                doc_limpo = re.sub(r"\D", "", dest_doc_text)
+                cfe_data["destinatario_documento"] = doc_limpo if doc_limpo else None
+            else:
+                cfe_data["destinatario_documento"] = None
             
-            # Nome Destinatário (pode ter label diferente)
-            dest_nome_text = await self._extrair_campo_por_titulo(page, "Nome", chave)
+            # Nome Destinatário - PRIMEIRO tentar pelo ID específico
+            dest_nome_text = None
+            try:
+                locator_dest_nome = page.locator("#conteudo_lblDestinatarioNome")
+                if await locator_dest_nome.count() > 0:
+                    dest_nome_text = await locator_dest_nome.inner_text(timeout=10000)
+            except Exception:
+                pass
+            
+            # Fallback para extração por título
+            if not dest_nome_text or not dest_nome_text.strip():
+                dest_nome_text = await self._extrair_campo_por_titulo(page, "Nome", chave)
             self.log(f"[DEBUG] Campo 'Nome' (Destinatário) extraído: {dest_nome_text}")
-            cfe_data["destinatario_nome"] = dest_nome_text.strip() if dest_nome_text else None
+            # Tratar "Não Informado" como nulo
+            if dest_nome_text and dest_nome_text.strip().lower() != "não informado":
+                cfe_data["destinatario_nome"] = dest_nome_text.strip()
+            else:
+                cfe_data["destinatario_nome"] = None
             
             self.log(f"Dados do cabeçalho extraídos: Número={cfe_data.get('numero_cfe')}, Valor={cfe_data.get('valor_total')}, CNPJ={cfe_data.get('cnpj_emitente')}")
             
