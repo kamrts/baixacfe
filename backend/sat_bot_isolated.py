@@ -347,14 +347,8 @@ class SATBotIsolated:
                 return cfe_data, []
             
             # CORREÇÃO 4 — Capturar TODOS os campos de produtos/serviços
-            # A tabela usa estrutura HTML padrão com <tr> e <td>
-            # Colunas (baseado no HTML fornecido):
-            # 0: Núm. | 1: Descrição | 2: Qtd. Comercial | 3: Unid. Comercial | 4: Valor Líquido do Item
-            # 5: Informações Adicionais | 6: Cód. Produto | 7: Cód. GTIN | 8: Cód. NCM
-            # 9: Código Especificador ST (CEST) | 10: CFOP | 11: Valor Unit. | 12: Valor Bruto
-            # 13: Regra de Cálculo | 14: Valor do Desconto | 15: Outras Despesas | 16: Rateio Desconto
-            # 17: Rateio Acréscimo | 18: Observações Fisco | 19: Origem Mercadoria | 20: Tributação ICMS
-            # 21: Cód. Situação Operação - Simples Nacional | 22+: Valor ICMS (possivelmente)
+            # Os dados estão em spans com IDs específicos no padrão:
+            # conteudo_grvProdutosServicos_lblProdutoServicoDesc_0, _1, _2, etc.
             
             # Contar número de itens pela quantidade de linhas (excluindo cabeçalho)
             num_itens = len(linhas_prod) - 1
@@ -380,6 +374,69 @@ class SATBotIsolated:
                 if not valor or valor.strip() == "" or valor.strip() == "Não Informado":
                     return None
                 return valor.strip()
+            
+            # Processar cada item usando os IDs dos spans
+            for idx in range(num_itens):
+                try:
+                    # Função para extrair valor do span pelo ID
+                    async def get_span_value(campo_id: str, item_idx: int = idx) -> Optional[str]:
+                        try:
+                            span = page.locator(f"#conteudo_grvProdutosServicos_{campo_id}_{item_idx}")
+                            if await span.count() > 0:
+                                return await span.inner_text(timeout=5000)
+                        except Exception:
+                            pass
+                        return None
+                    
+                    # Extrair todos os campos usando os IDs corretos do HTML
+                    item = {
+                        "numero_item": parse_int(await get_span_value("lblProdutoServicoNum")) or idx + 1,
+                        "descricao": limpar_valor(await get_span_value("lblProdutoServicoDesc")) or "",
+                        "quantidade_comercial": parse_float(await get_span_value("lblProdutoServicoQtd")),
+                        "unidade_comercial": limpar_valor(await get_span_value("lblProdutoServicoUnit")) or "UN",
+                        "valor_liquido": parse_float(await get_span_value("lblProdutoServicoIcmsValorLiquidoItem")),
+                        "info_adicional": limpar_valor(await get_span_value("lblProdutoServicoInformacaoAdicionalProduto")),
+                        "codigo_produto": limpar_valor(await get_span_value("lblProdutoServicoCodigoProduto")) or "",
+                        "gtin": limpar_valor(await get_span_value("lblProdutoServicoGtin")),
+                        "ncm": limpar_valor(await get_span_value("lblProdutoServicoNcm")),
+                        "cest": limpar_valor(await get_span_value("lblCest")),
+                        "cfop": limpar_valor(await get_span_value("lblProdutoServicoCFOP")) or "5929",
+                        "valor_unitario": parse_float(await get_span_value("lblProdutoServicoValorUnit")),
+                        "valor_bruto": parse_float(await get_span_value("lblProdutoServicoValorBruto")),
+                        "regra_calculo": limpar_valor(await get_span_value("lblProdutoServicoRegraCalculo")),
+                        "valor_desconto": parse_float(await get_span_value("lblProdutoServicoValorDesconto")),
+                        "outras_despesas": parse_float(await get_span_value("lblProdutoServicoOutrasDespesasAcessorias")),
+                        "rateio_desconto": parse_float(await get_span_value("lblProdutoServicoRateioDescontoSubtotal")),
+                        "rateio_acrescimo": parse_float(await get_span_value("lblProdutoServicoRateioAcrescimoSubtotal")),
+                        "observacoes_fisco": limpar_valor(await get_span_value("lblProdutoServicoObservacaoFisco")),
+                        "origem_mercadoria": limpar_valor(await get_span_value("lblProdutoServicoOrigemMercadoria")),
+                        "tributacao_icms": limpar_valor(await get_span_value("lblProdutoServicoTributacaoIcms")),
+                        "situacao_simples_nacional": limpar_valor(await get_span_value("lblProdutoServicoCodigoSituacaoOperacaoSimplesNacional")),
+                        "aliquota_efetiva": parse_float(await get_span_value("lblProdutoServicoAliquotaEfetiva")),
+                        "valor_icms": parse_float(await get_span_value("lblProdutoServicoValorIcms")),
+                        # PIS
+                        "pis_cst": limpar_valor(await get_span_value("lblProdutoServicoPisCodigoSitucaoTributario")),
+                        "pis_base_calculo": parse_float(await get_span_value("lblProdutoServicoPisValorBaseCalculoPis")),
+                        "pis_aliquota": parse_float(await get_span_value("lblProdutoServicoPisAliquotaPisPorcentagem")),
+                        "pis_valor": parse_float(await get_span_value("lblProdutoServicoPisValorPis")),
+                        # COFINS
+                        "cofins_cst": limpar_valor(await get_span_value("lblProdutoServicoCofinsCodigoSituacaoTributarioCofins")),
+                        "cofins_base_calculo": parse_float(await get_span_value("lblProdutoServicoCofinsValorBaseCalculoCofins")),
+                        "cofins_aliquota": parse_float(await get_span_value("lblProdutoServicoAliquotaCofinsPorcentagem")),
+                        "cofins_valor": parse_float(await get_span_value("lblProdutoServicoCofinsValorCofins")),
+                        # Valor aproximado tributos (Lei 12741)
+                        "valor_aproximado_tributos": parse_float(await get_span_value("lblvalorItem12741")),
+                    }
+                    
+                    # Log do primeiro item para debug
+                    if idx == 0:
+                        self.log(f"[DEBUG] Primeiro item extraído: {item}")
+                    
+                    itens_data.append(item)
+                    
+                except Exception as e:
+                    self.log(f"[DEBUG] Erro ao processar item {idx + 1}: {e}", logging.WARNING)
+                    continue
             
             # Processar cada linha da tabela (ignorando cabeçalho - linha 0)
             for idx, linha in enumerate(linhas_prod[1:]):
