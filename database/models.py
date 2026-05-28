@@ -38,7 +38,7 @@ class Cfe(Base):
     numero_cfe = Column(Integer, nullable=False, default=0)
     valor_total = Column(Numeric(10, 2), nullable=False, default=0.00)
     data_hora_emissao = Column(DateTime, nullable=False, default=datetime.utcnow)
-    cnpj_emitente = Column(String(14), nullable=False)
+    cnpj_emitente = Column(String(14), nullable=False, default="00000000000000")
     nome_emitente = Column(String(150), nullable=False, default="Emitente Desconhecido")
     inscricao_estadual = Column(String(20), nullable=True)
     uf_emitente = Column(String(2), default="SP")
