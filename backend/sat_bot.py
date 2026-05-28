@@ -599,6 +599,8 @@ class SATBot:
         Abre o arquivo baixado, checa se possui tamanho > 0 bytes,
         verifica se o conteúdo inicia com XML válido e
         extrai o atributo 'Id' da tag CFe (ex: Id="CFe352605...").
+        
+        Suporta tanto XML com tag raiz CFe quanto envCFe (envelope de lote).
         """
         if not file_path.exists() or file_path.stat().st_size == 0:
             self.log(f"Arquivo inexistente ou vazio: {file_path}", logging.WARNING)
@@ -609,17 +611,23 @@ class SATBot:
             with open(file_path, 'rb') as f:
                 inicio = f.read(100)
                 # Verificar se inicia com declaração XML ou tag XML válida
-                if not (inicio.strip().startswith(b'<?xml') or inicio.strip().startswith(b'<CFe') or inicio.strip().startswith(b'<cfe')):
+                # Aceita: <?xml, <CFe, <cfe, <envCFe (envelope de lote)
+                if not (inicio.strip().startswith(b'<?xml') or 
+                        inicio.strip().startswith(b'<CFe') or 
+                        inicio.strip().startswith(b'<cfe') or
+                        inicio.strip().startswith(b'<envCFe')):
                     self.log(f"Arquivo não é XML válido (início: {inicio[:50]}...)", logging.WARNING)
                     return None
             
             tree = ET.parse(file_path)
             root = tree.getroot()
             
-            # O elemento raiz deve ser infCFe ou CFe
+            # O elemento raiz pode ser CFe (individual) ou envCFe (envelope de lote)
             tag_name = root.tag.split('}')[-1] # Remove namespaces eventuais
             
-            if tag_name == "CFe":
+            # CORREÇÃO: Aceitar tanto CFe quanto envCFe como tag raiz válida
+            if tag_name in ("CFe", "envCFe"):
+                # Buscar infCFe em qualquer nível da árvore
                 infCfe = root.find(".//{*}infCFe")
                 if infCfe is not None and "Id" in infCfe.attrib:
                     # Remove o prefixo "CFe" para obter apenas a chave numérica de 44 dígitos
@@ -628,6 +636,14 @@ class SATBot:
                         return chave
                     else:
                         self.log(f"Chave extraída inválida: {chave}", logging.WARNING)
+                else:
+                    # Fallback: tentar buscar pelo elemento chCFe (chave do CF-e)
+                    chCfe = root.find(".//{*}chCFe")
+                    if chCfe is not None and chCfe.text:
+                        chave = chCfe.text.strip()
+                        if len(chave) == 44 and chave.isdigit():
+                            return chave
+                    self.log(f"Elemento infCFe ou chCFe não encontrado no XML", logging.WARNING)
             else:
                 self.log(f"Tag raiz inesperada: {tag_name}", logging.WARNING)
             return None
