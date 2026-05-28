@@ -432,30 +432,56 @@ class SATBot:
                     await txt_serie.first.select_option(label=serie)
                 else:
                     await txt_serie.first.fill(serie)
+                self.log(f"[DEBUG] Número de série preenchido: {serie}")
                     
-            # Preencher Datas
-            txt_data_ini = page.locator("input[id*='txtDataInicio'], input[id*='txtDataIni']")
-            txt_data_fim = page.locator("input[id*='txtDataFim']")
+            # Preencher Datas - IDs corretos do portal SAT: txtDataInicio e txtDataTermino
+            txt_data_ini = page.locator("#conteudo_txtDataInicio, input[id*='txtDataInicio'], input[id*='txtDataIni']")
+            txt_data_fim = page.locator("#conteudo_txtDataTermino, input[id*='txtDataTermino'], input[id*='txtDataFim']")
+            
+            data_ini_str = start_date.strftime("%d/%m/%Y")
+            data_fim_str = end_date.strftime("%d/%m/%Y")
             
             if await txt_data_ini.count() > 0:
-                await txt_data_ini.first.fill(start_date.strftime("%d/%m/%Y"))
-            if await txt_data_fim.count() > 0:
-                await txt_data_fim.first.fill(end_date.strftime("%d/%m/%Y"))
+                await txt_data_ini.first.fill(data_ini_str)
+                self.log(f"[DEBUG] Data inicial preenchida: {data_ini_str}")
+            else:
+                self.log("[DEBUG] Campo de data inicial NÃO encontrado!", logging.WARNING)
                 
-            # Preencher Horas Fixas
-            txt_hora_ini = page.locator("input[id*='txtHoraInicio'], input[id*='txtHoraIni']")
-            txt_hora_fim = page.locator("input[id*='txtHoraFim']")
+            if await txt_data_fim.count() > 0:
+                await txt_data_fim.first.fill(data_fim_str)
+                self.log(f"[DEBUG] Data final preenchida: {data_fim_str}")
+            else:
+                self.log("[DEBUG] Campo de data final NÃO encontrado!", logging.WARNING)
+                
+            # Preencher Horas - IDs corretos do portal SAT: txtHoraInicio e txtHoraTermino
+            txt_hora_ini = page.locator("#conteudo_txtHoraInicio, input[id*='txtHoraInicio'], input[id*='txtHoraIni']")
+            txt_hora_fim = page.locator("#conteudo_txtHoraTermino, input[id*='txtHoraTermino'], input[id*='txtHoraFim']")
+            
+            # Usar horários do job se disponíveis, senão usar padrão
+            hora_ini_str = start_date.strftime("%H:%M") if start_date.hour != 0 or start_date.minute != 0 else "00:00"
+            hora_fim_str = end_date.strftime("%H:%M") if end_date.hour != 0 or end_date.minute != 0 else "23:59"
             
             if await txt_hora_ini.count() > 0:
-                await txt_hora_ini.first.fill("00:00")
+                await txt_hora_ini.first.fill(hora_ini_str)
+                self.log(f"[DEBUG] Hora inicial preenchida: {hora_ini_str}")
+            else:
+                self.log("[DEBUG] Campo de hora inicial NÃO encontrado!", logging.WARNING)
+                
             if await txt_hora_fim.count() > 0:
-                await txt_hora_fim.first.fill("23:59")
+                await txt_hora_fim.first.fill(hora_fim_str)
+                self.log(f"[DEBUG] Hora final preenchida: {hora_fim_str}")
+            else:
+                self.log("[DEBUG] Campo de hora final NÃO encontrado!", logging.WARNING)
                 
             # Clicar em Pesquisar
-            btn_pesquisar = page.locator("input[id*='btnPesquisar'], input[id*='btnConsultar']")
-            await btn_pesquisar.click()
-            await page.wait_for_load_state("networkidle")
-            await asyncio.sleep(self.request_delay)
+            btn_pesquisar = page.locator("#conteudo_btnPesquisar, input[id*='btnPesquisar'], input[id*='btnConsultar']")
+            if await btn_pesquisar.count() > 0:
+                await btn_pesquisar.click()
+                self.log("[DEBUG] Botão Pesquisar clicado")
+                await page.wait_for_load_state("networkidle")
+                await asyncio.sleep(self.request_delay)
+            else:
+                self.log("[DEBUG] Botão Pesquisar NÃO encontrado!", logging.WARNING)
             return True
             
         except Exception as e:
