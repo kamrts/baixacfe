@@ -1,6 +1,6 @@
 # database/models.py
 from datetime import datetime
-from sqlalchemy import Column, Integer, String, Numeric, DateTime, ForeignKey, Text, Boolean
+from sqlalchemy import Column, Integer, String, Numeric, DateTime, ForeignKey, Text, Boolean, UniqueConstraint
 from sqlalchemy.orm import declarative_base, relationship
 
 Base = declarative_base()
@@ -104,6 +104,11 @@ class CfeItem(Base):
     valor_aproximado_tributos = Column(Numeric(12, 2), default=0.00)
 
     cfe = relationship("Cfe", back_populates="itens")
+    
+    # CORREÇÃO: Constraint UNIQUE para evitar duplicidade de itens
+    __table_args__ = (
+        UniqueConstraint('chave_cfe', 'numero_item', 'codigo_produto', name='uq_cfe_item_unique'),
+    )
 
 class QueueProgress(Base):
     """
