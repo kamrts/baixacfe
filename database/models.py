@@ -62,27 +62,27 @@ class CfeItem(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     chave_cfe = Column(String(44), ForeignKey('SAT_Cfe.chave', ondelete='CASCADE'), nullable=False)
     numero_item = Column(Integer, nullable=False, default=0)
-    codigo_produto = Column(String(60), nullable=False, default="N/A")
-    descricao = Column(String(120), nullable=False, default="Produto não identificado")
+    codigo_produto = Column(String(255), nullable=False, default="N/A")
+    descricao = Column(String(255), nullable=False, default="Produto não identificado")
     quantidade_comercial = Column(Numeric(12, 4), nullable=False, default=0.0)
-    unidade_comercial = Column(String(10), nullable=False, default="UN")
+    unidade_comercial = Column(String(255), nullable=False, default="UN")
     valor_unitario = Column(Numeric(12, 4), nullable=False, default=0.0)
     valor_bruto = Column(Numeric(12, 2), nullable=False, default=0.0)
     valor_liquido = Column(Numeric(12, 2), nullable=False, default=0.0)
     valor_desconto = Column(Numeric(12, 2), default=0.00)
-    cfop = Column(String(4), nullable=False, default="0000")
-    ncm = Column(String(8), nullable=True)
-    cest = Column(String(7), nullable=True)
-    gtin = Column(String(14), nullable=True)
-    origem_mercadoria = Column(String(100), nullable=True)  # Texto descritivo da origem
-    tributacao_icms = Column(String(100), nullable=True)  # CST ou CSOSN com descrição
-    situacao_simples_nacional = Column(String(10), nullable=True)
+    cfop = Column(String(255), nullable=False, default="0000")
+    ncm = Column(String(255), nullable=True)
+    cest = Column(String(255), nullable=True)
+    gtin = Column(String(255), nullable=True)
+    origem_mercadoria = Column(String(255), nullable=True)  # Texto descritivo da origem
+    tributacao_icms = Column(String(255), nullable=True)  # CST ou CSOSN com descrição
+    situacao_simples_nacional = Column(String(255), nullable=True)
     valor_icms = Column(Numeric(12, 2), default=0.00)
     observacoes_fisco = Column(Text, nullable=True)
     
     # Campos adicionais extraídos do portal SAT
     info_adicional = Column(Text, nullable=True)
-    regra_calculo = Column(String(10), nullable=True)
+    regra_calculo = Column(String(255), nullable=True)
     outras_despesas = Column(Numeric(12, 2), default=0.00)
     rateio_desconto = Column(Numeric(12, 2), default=0.00)
     rateio_acrescimo = Column(Numeric(12, 2), default=0.00)
