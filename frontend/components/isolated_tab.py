@@ -3,6 +3,7 @@ from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QFrame,
                                QLabel, QLineEdit, QPushButton, QTableWidget, 
                                QTableWidgetItem, QFileDialog, QHeaderView)
 from PySide6.QtCore import Qt, Signal
+from datetime import datetime
 
 class IsolatedTab(QWidget):
     """
@@ -14,6 +15,9 @@ class IsolatedTab(QWidget):
     
     def __init__(self, parent=None):
         super().__init__(parent)
+        self.start_time = None
+        self.total_keys = 0
+        self.processed_keys = 0
         self.init_ui()
         
     def init_ui(self):
@@ -62,7 +66,40 @@ class IsolatedTab(QWidget):
         
         layout.addWidget(form_frame)
         
-        # 2. Tabela de Resultados
+        # 2. Painel de Resumo / Estatísticas da Execução
+        self.stats_frame = QFrame()
+        self.stats_frame.setObjectName("cardFrame")
+        self.stats_frame.setStyleSheet("""
+            QFrame#cardFrame {
+                background-color: #1e293b;
+                border: 1px solid #334155;
+                border-radius: 6px;
+            }
+        """)
+        stats_layout = QHBoxLayout(self.stats_frame)
+        stats_layout.setContentsMargins(15, 10, 15, 10)
+        stats_layout.setSpacing(10)
+        
+        self.lbl_processed = QLabel("Processadas: 0 / 0")
+        self.lbl_processed.setStyleSheet("font-weight: bold; color: #3b82f6; font-size: 13px;")
+        
+        self.lbl_remaining = QLabel("Faltam: 0")
+        self.lbl_remaining.setStyleSheet("font-weight: bold; color: #94a3b8; font-size: 13px;")
+        
+        self.lbl_errors = QLabel("Erros: 0")
+        self.lbl_errors.setStyleSheet("font-weight: bold; color: #ef4444; font-size: 13px;")
+        
+        self.lbl_time = QLabel("Tempo Restante: --:--")
+        self.lbl_time.setStyleSheet("font-weight: bold; color: #10b981; font-size: 13px;")
+        
+        stats_layout.addWidget(self.lbl_processed, 1, Qt.AlignCenter)
+        stats_layout.addWidget(self.lbl_remaining, 1, Qt.AlignCenter)
+        stats_layout.addWidget(self.lbl_errors, 1, Qt.AlignCenter)
+        stats_layout.addWidget(self.lbl_time, 2, Qt.AlignCenter)
+        
+        layout.addWidget(self.stats_frame)
+        
+        # 3. Tabela de Resultados
         table_label = QLabel("Status das Chaves Processadas:")
         table_label.setObjectName("subtitleLabel")
         layout.addWidget(table_label)
@@ -101,10 +138,20 @@ class IsolatedTab(QWidget):
             "download_folder": self.txt_output_dir.text().strip()
         }
 
+    def reset_stats(self):
+        """Reinicia as variáveis de estatísticas para uma nova busca."""
+        self.start_time = None
+        self.processed_keys = 0
+        self.update_stats_display()
+
     def populate_results_table(self, rows: list):
         """Popula a tabela inicialmente após a leitura e validação do Excel."""
         self.table_results.setRowCount(0)
         self.table_results.setRowCount(len(rows))
+        
+        self.total_keys = len(rows)
+        self.processed_keys = 0
+        self.start_time = None
         
         for idx, r in enumerate(rows):
             # Linha
@@ -127,10 +174,53 @@ class IsolatedTab(QWidget):
             self.table_results.setItem(idx, 4, QTableWidgetItem(r["mensagem"]))
             
         self.table_results.resizeRowsToContents()
+        self.update_stats_display()
+
+    def update_stats_display(self):
+        """Recalcula e atualiza as informações exibidas nos cards superiores."""
+        # Contar erros diretamente na tabela para precisão absoluta
+        erros = 0
+        for r_idx in range(self.table_results.rowCount()):
+            status_item = self.table_results.item(r_idx, 3)
+            if status_item:
+                status_text = status_item.text()
+                if "ERRO" in status_text or status_text == "NAO_ENCONTRADO":
+                    erros += 1
+                    
+        self.lbl_processed.setText(f"Processadas: {self.processed_keys} / {self.total_keys}")
+        self.lbl_remaining.setText(f"Faltam: {max(0, self.total_keys - self.processed_keys)}")
+        self.lbl_errors.setText(f"Erros: {erros}")
+        
+        # Calcular Tempo Estimado Relativo
+        if self.start_time and self.processed_keys > 0:
+            elapsed_seconds = (datetime.now() - self.start_time).total_seconds()
+            speed = self.processed_keys / elapsed_seconds if elapsed_seconds > 0 else 0
+            remaining = max(0, self.total_keys - self.processed_keys)
+            
+            if speed > 0 and remaining > 0:
+                remaining_seconds = int(remaining / speed)
+                mins, secs = divmod(remaining_seconds, 60)
+                hrs, mins = divmod(mins, 60)
+                if hrs > 0:
+                    time_str = f"{hrs:02d}h {mins:02d}m {secs:02d}s"
+                else:
+                    time_str = f"{mins:02d}m {secs:02d}s"
+                self.lbl_time.setText(f"Tempo Restante: {time_str}")
+            elif remaining == 0:
+                self.lbl_time.setText("Tempo Restante: Concluído")
+            else:
+                self.lbl_time.setText("Tempo Restante: Calculando...")
+        else:
+            self.lbl_time.setText("Tempo Restante: Calculando...")
 
     def update_key_status(self, progress_data: dict):
         """Atualiza dinamicamente a célula de status de uma chave específica durante a execução."""
+        if self.start_time is None:
+            self.start_time = datetime.now()
+            
         target_key = progress_data["chave"]
+        self.total_keys = progress_data.get("total", self.total_keys)
+        self.processed_keys = progress_data.get("atual", self.processed_keys)
         
         # Procurar a linha correspondente na tabela
         for r_idx in range(self.table_results.rowCount()):
@@ -154,3 +244,4 @@ class IsolatedTab(QWidget):
                 break
                 
         self.table_results.resizeRowsToContents()
+        self.update_stats_display()

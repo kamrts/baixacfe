@@ -2,9 +2,10 @@
 import os
 import asyncio
 import logging
+from datetime import datetime
 from pathlib import Path
 from PySide6.QtWidgets import QMainWindow, QTabWidget, QMessageBox
-from PySide6.QtCore import QThread, Signal, Slot
+from PySide6.QtCore import QThread, Signal, Slot, QTimer
 
 from database.connection import create_db_engine, get_session_factory, initialize_database
 from database.models import QueueProgress
@@ -78,6 +79,8 @@ class MainWindow(QMainWindow):
         self.session_factory = None
         self.bot_instance = None
         self.worker = None
+        self.refresh_timer = None
+        self.batch_start_time = None
         
         self.init_ui()
         self.load_stylesheet()
@@ -351,6 +354,13 @@ class MainWindow(QMainWindow):
         self.tab_dashboard.update_kpi("status", "Ativo (Lote)")
         self.tabs.setCurrentIndex(0) # Joga o usuário no dashboard para ver rodar
         
+        # Inicializar Timer de Atualização em Tempo Real (Sem afetar performance do bot)
+        self.batch_start_time = datetime.now()
+        if not self.refresh_timer:
+            self.refresh_timer = QTimer(self)
+            self.refresh_timer.timeout.connect(self.atualizar_status_lote_tempo_real)
+        self.refresh_timer.start(3000)
+        
         self.worker.start()
 
     def iniciar_busca_isolada(self):
@@ -367,6 +377,7 @@ class MainWindow(QMainWindow):
             
         self.tab_dashboard.clear_logs()
         self.tab_dashboard.append_log("Iniciando busca isolada por Planilha...")
+        self.tab_isolated.reset_stats()
         
         # Configurações do Robô Isolado
         cfg_bot = self.obter_configs_totais()
@@ -383,7 +394,7 @@ class MainWindow(QMainWindow):
             output_folder=cfg_bot["download_folder"]
         )
         self.worker.log_received.connect(self.tab_dashboard.append_log)
-        self.worker.progress_received.connect(self.tab_isolated.update_key_status)
+        self.worker.progress_received.connect(self.atualizar_progresso_busca_isolada)
         self.worker.finished_signal.connect(self.execucao_finalizada)
         
         # Configurar UI
@@ -393,8 +404,91 @@ class MainWindow(QMainWindow):
         
         self.worker.start()
 
+    @Slot(dict)
+    def atualizar_progresso_busca_isolada(self, progress_data: dict):
+        """Atualiza dinamicamente o progresso na aba isolada e nos KPIs do Dashboard principal."""
+        self.tab_isolated.update_key_status(progress_data)
+        
+        total = progress_data.get("total", 0)
+        atual = progress_data.get("atual", 0)
+        
+        # Calcular erros dinamicamente a partir do painel de chaves
+        erros = 0
+        for r_idx in range(self.tab_isolated.table_results.rowCount()):
+            status_item = self.tab_isolated.table_results.item(r_idx, 3)
+            if status_item:
+                status_text = status_item.text()
+                if "ERRO" in status_text or status_text == "NAO_ENCONTRADO":
+                    erros += 1
+                    
+        sucessos = max(0, atual - erros)
+        
+        # Atualizar Dashboard
+        self.tab_dashboard.update_kpi("success", str(sucessos))
+        self.tab_dashboard.update_kpi("errors", str(erros))
+        
+        # Progresso em %
+        pct = int(atual / total * 100) if total > 0 else 0
+        self.tab_dashboard.set_progress(pct)
+        
+        # Atualizar tempo restante relativo
+        time_text = self.tab_isolated.lbl_time.text().replace("Tempo Restante: ", "")
+        self.tab_dashboard.update_kpi("time", time_text)
+
+    def atualizar_status_lote_tempo_real(self):
+        """Busca o status consolidado do banco de dados e atualiza a aba de Lotes e o Dashboard."""
+        if not self.session_factory:
+            return
+            
+        try:
+            with self.session_factory() as session:
+                queue_items = session.query(QueueProgress).all()
+                
+            self.tab_batch.update_queue_table(queue_items)
+            
+            # Calcular consolidadores para o Dashboard
+            total_lotes = len(queue_items)
+            lotes_concluidos = sum(1 for item in queue_items if item.status == "CONCLUIDO")
+            total_xmls = sum(item.xmls_baixados for item in queue_items)
+            total_erros = sum(1 for item in queue_items if item.status == "ERRO")
+            
+            # Atualizar KPIs no Dashboard
+            self.tab_dashboard.update_kpi("success", str(total_xmls))
+            self.tab_dashboard.update_kpi("errors", str(total_erros))
+            
+            # Progresso em %
+            pct = int(lotes_concluidos / total_lotes * 100) if total_lotes > 0 else 0
+            self.tab_dashboard.set_progress(pct)
+            
+            # Tempo Estimado Restante Relativo
+            if self.batch_start_time and lotes_concluidos > 0:
+                elapsed = (datetime.now() - self.batch_start_time).total_seconds()
+                speed = lotes_concluidos / elapsed if elapsed > 0 else 0
+                remaining_lotes = max(0, total_lotes - lotes_concluidos)
+                
+                if speed > 0 and remaining_lotes > 0:
+                    remaining_seconds = int(remaining_lotes / speed)
+                    mins, secs = divmod(remaining_seconds, 60)
+                    hrs, mins = divmod(mins, 60)
+                    if hrs > 0:
+                        time_str = f"{hrs:02d}h {mins:02d}m {secs:02d}s"
+                    else:
+                        time_str = f"{mins:02d}m {secs:02d}s"
+                    self.tab_dashboard.update_kpi("time", f"{time_str} restante(s)")
+                elif remaining_lotes == 0:
+                    self.tab_dashboard.update_kpi("time", "Concluído")
+                else:
+                    self.tab_dashboard.update_kpi("time", "Calculando...")
+            else:
+                self.tab_dashboard.update_kpi("time", "Calculando...")
+                
+        except Exception as e:
+            logger.error(f"Erro na atualização automática do lote: {e}")
+
     def parar_execucao(self):
         """Solicita a interrupção segura da thread ativa do robô."""
+        if self.refresh_timer:
+            self.refresh_timer.stop()
         if self.bot_instance:
             self.tab_dashboard.append_log("Parando robô de automação...", logging.WARNING)
             self.bot_instance.stop()
@@ -402,14 +496,14 @@ class MainWindow(QMainWindow):
     @Slot(str)
     def execucao_finalizada(self, msg: str):
         """Slot acionado quando a thread de background conclui com sucesso ou erro."""
+        if self.refresh_timer:
+            self.refresh_timer.stop()
+            
         self.tab_dashboard.append_log(f"Thread finalizada: {msg}")
         self.tab_dashboard.set_running_state(False)
         self.tab_dashboard.update_kpi("status", "Parado")
         
-        # Atualizar tabelas para consolidar visualmente
-        if self.session_factory:
-            with self.session_factory() as session:
-                queue_items = session.query(QueueProgress).all()
-                self.tab_batch.update_queue_table(queue_items)
-                
+        # Atualizar resumo do lote uma última vez
+        self.atualizar_status_lote_tempo_real()
+        
         QMessageBox.information(self, "Automação SAT", f"Processamento concluído!\n{msg}")

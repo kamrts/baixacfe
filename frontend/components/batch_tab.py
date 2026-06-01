@@ -1,5 +1,6 @@
 # frontend/components/batch_tab.py
 from datetime import datetime
+import json
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QFrame, 
                                QLabel, QPlainTextEdit, QDateEdit, QLineEdit, 
                                QPushButton, QTableWidget, QTableWidgetItem, 
@@ -88,7 +89,42 @@ class BatchTab(QWidget):
         
         layout.addWidget(form_frame)
         
-        # 2. Tabela de Acompanhamento da Fila em Tempo Real
+        # 2. Painel de Resumo Consolidado do Lote (Novo)
+        self.summary_frame = QFrame()
+        self.summary_frame.setObjectName("cardFrame")
+        self.summary_frame.setStyleSheet("""
+            QFrame#cardFrame {
+                background-color: #1e293b;
+                border: 1px solid #334155;
+                border-radius: 6px;
+            }
+        """)
+        summary_layout = QVBoxLayout(self.summary_frame)
+        summary_layout.setContentsMargins(15, 12, 15, 12)
+        summary_layout.setSpacing(8)
+        
+        # Primeira linha: Lotes Concluídos e Total XMLs Baixados
+        row1_layout = QHBoxLayout()
+        self.lbl_lotes_progress = QLabel("Lotes Concluídos: 0 de 0 (0%)")
+        self.lbl_lotes_progress.setStyleSheet("font-weight: bold; color: #3b82f6; font-size: 13px;")
+        
+        self.lbl_xmls_total = QLabel("Total XMLs Baixados: 0")
+        self.lbl_xmls_total.setStyleSheet("font-weight: bold; color: #10b981; font-size: 13px;")
+        
+        row1_layout.addWidget(self.lbl_lotes_progress)
+        row1_layout.addStretch()
+        row1_layout.addWidget(self.lbl_xmls_total)
+        summary_layout.addLayout(row1_layout)
+        
+        # Segunda linha: Datas Processadas
+        self.lbl_dates_processed = QLabel("Datas Processadas: Nenhuma")
+        self.lbl_dates_processed.setStyleSheet("color: #94a3b8; font-size: 12px;")
+        self.lbl_dates_processed.setWordWrap(True)
+        summary_layout.addWidget(self.lbl_dates_processed)
+        
+        layout.addWidget(self.summary_frame)
+        
+        # 3. Tabela de Acompanhamento da Fila em Tempo Real
         table_label = QLabel("Fila de Execução e Status em Tempo Real:")
         table_label.setObjectName("subtitleLabel")
         layout.addWidget(table_label)
@@ -136,9 +172,14 @@ class BatchTab(QWidget):
         }
 
     def update_queue_table(self, queue_items: list):
-        """Atualiza a grade QTableWidget em tempo real com o status de execução de cada item da fila."""
+        """Atualiza a grade QTableWidget em tempo real com o status de execução de cada item da fila e consolida o painel de resumo."""
         self.table_queue.setRowCount(0)
         self.table_queue.setRowCount(len(queue_items))
+        
+        total_lotes = len(queue_items)
+        lotes_concluidos = 0
+        total_xmls = 0
+        datas_concluidas = []
         
         for idx, item in enumerate(queue_items):
             # CNPJ
@@ -154,12 +195,24 @@ class BatchTab(QWidget):
             
             # XMLs Baixados
             self.table_queue.setItem(idx, 3, QTableWidgetItem(str(item.xmls_baixados)))
+            total_xmls += item.xmls_baixados
             
             # Status (com alinhamento e cores personalizadas)
             status_item = QTableWidgetItem(item.status)
             status_item.setTextAlignment(Qt.AlignCenter)
             if item.status == "CONCLUIDO":
                 status_item.setForeground(Qt.green)
+                lotes_concluidos += 1
+                
+                # Armazenar data(s) concluída(s)
+                if item.datas_especificas:
+                    try:
+                        datas = json.loads(item.datas_especificas)
+                        datas_concluidas.extend(datas)
+                    except Exception:
+                        pass
+                else:
+                    datas_concluidas.append(f"{item.periodo_inicio.strftime('%d/%m/%Y')} a {item.periodo_fim.strftime('%d/%m/%Y')}")
             elif item.status == "ERRO":
                 status_item.setForeground(Qt.red)
             elif item.status == "EM_ANDAMENTO":
@@ -171,3 +224,15 @@ class BatchTab(QWidget):
             self.table_queue.setItem(idx, 5, QTableWidgetItem(att_time))
             
         self.table_queue.resizeRowsToContents()
+        
+        # Atualizar painel de resumo
+        pct = (lotes_concluidos / total_lotes * 100) if total_lotes > 0 else 0
+        self.lbl_lotes_progress.setText(f"Lotes Concluídos: {lotes_concluidos} de {total_lotes} ({pct:.1f}%)")
+        self.lbl_xmls_total.setText(f"Total XMLs Baixados: {total_xmls}")
+        
+        if datas_concluidas:
+            # Remover duplicados mantendo a ordem
+            unique_datas = list(dict.fromkeys(datas_concluidas))
+            self.lbl_dates_processed.setText(f"Datas Processadas: {', '.join(unique_datas)}")
+        else:
+            self.lbl_dates_processed.setText("Datas Processadas: Nenhuma")

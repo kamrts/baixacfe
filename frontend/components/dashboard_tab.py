@@ -173,6 +173,10 @@ class DashboardTab(QWidget):
         elif kpi_name == "time":
             self.card_time.value_label.setText(value)
 
+    def set_progress(self, value: int):
+        """Atualiza o valor da barra de progresso geral."""
+        self.progress_bar.setValue(value)
+
     def set_running_state(self, running: bool):
         """Bloqueia/Desbloqueia os botões da UI conforme o robô está ativo ou inativo."""
         self.btn_start_batch.setEnabled(not running)
