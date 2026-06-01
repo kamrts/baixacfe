@@ -128,3 +128,5 @@ class QueueProgress(Base):
     ultimo_erro = Column(Text, nullable=True)
     xmls_baixados = Column(Integer, default=0)
     data_atualizacao = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    # NOVO: Lista de datas específicas para busca (JSON serializado, ex: ["2022-07-29", "2022-08-15"])
+    datas_especificas = Column(Text, nullable=True)

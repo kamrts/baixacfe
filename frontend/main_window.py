@@ -314,13 +314,19 @@ class MainWindow(QMainWindow):
         self.tab_dashboard.clear_logs()
         self.tab_dashboard.append_log("Iniciando fluxo de Busca em Lote...")
         
+        # NOVO: Capturar datas específicas do dashboard
+        datas_especificas = self.tab_dashboard.get_datas_especificas()
+        if datas_especificas:
+            self.tab_dashboard.append_log(f"Usando {len(datas_especificas)} datas específicas para busca...")
+        
         # 1. Popular Fila no Banco de Dados
         with self.session_factory() as session:
             StateManager.populate_queue(
                 session, 
                 form_data["cnpjs"], 
                 form_data["start_date"], 
-                form_data["end_date"]
+                form_data["end_date"],
+                datas_especificas=datas_especificas  # NOVO: Passar datas específicas
             )
             
             # Recuperar itens para exibir na Grid da aba de Lotes

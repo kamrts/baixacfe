@@ -1,6 +1,7 @@
 # frontend/components/dashboard_tab.py
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QFrame, 
-                               QLabel, QPushButton, QProgressBar, QPlainTextEdit)
+                               QLabel, QPushButton, QProgressBar, QPlainTextEdit,
+                               QGroupBox, QTextEdit)
 from PySide6.QtGui import QTextCursor
 from PySide6.QtCore import Qt, Signal, Slot
 
@@ -51,6 +52,33 @@ class DashboardTab(QWidget):
         progress_layout.addWidget(progress_label)
         progress_layout.addWidget(self.progress_bar)
         layout.addLayout(progress_layout)
+        
+        # 2.5 NOVO: Campo para datas específicas de busca
+        dates_group = QGroupBox("Datas Específicas para Busca (opcional)")
+        dates_group.setObjectName("groupBox")
+        dates_layout = QVBoxLayout(dates_group)
+        
+        dates_help = QLabel("Insira datas específicas (uma por linha) no formato AAAA-MM-DD. Ex: 2022-07-29")
+        dates_help.setStyleSheet("font-size: 11px; color: #94a3b8;")
+        dates_help.setWordWrap(True)
+        
+        self.txt_datas_especificas = QTextEdit()
+        self.txt_datas_especificas.setPlaceholderText("2022-07-29\n2022-08-15\n2023-01-10")
+        self.txt_datas_especificas.setFixedHeight(80)
+        self.txt_datas_especificas.setStyleSheet("""
+            QTextEdit {
+                background-color: #1e293b;
+                color: #e2e8f0;
+                border: 1px solid #334155;
+                border-radius: 4px;
+                padding: 5px;
+                font-family: 'Consolas', monospace;
+            }
+        """)
+        
+        dates_layout.addWidget(dates_help)
+        dates_layout.addWidget(self.txt_datas_especificas)
+        layout.addWidget(dates_group)
         
         # 3. Painel de Controle (Botões Principais)
         controls_layout = QHBoxLayout()
@@ -151,3 +179,22 @@ class DashboardTab(QWidget):
         self.btn_start_isolated.setEnabled(not running)
         self.btn_pause.setEnabled(running)
         self.btn_stop.setEnabled(running)
+        self.txt_datas_especificas.setEnabled(not running)
+
+    def get_datas_especificas(self) -> list[str]:
+        """
+        Retorna a lista de datas específicas inseridas pelo usuário.
+        Filtra linhas vazias e valida o formato AAAA-MM-DD.
+        """
+        texto = self.txt_datas_especificas.toPlainText().strip()
+        if not texto:
+            return []
+        
+        datas = []
+        for linha in texto.split('\n'):
+            data = linha.strip()
+            if data:
+                # Validar formato básico AAAA-MM-DD
+                if len(data) == 10 and data[4] == '-' and data[7] == '-':
+                    datas.append(data)
+        return datas

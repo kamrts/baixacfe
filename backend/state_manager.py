@@ -1,4 +1,5 @@
 # backend/state_manager.py
+import json
 import logging
 from datetime import datetime, timedelta
 from typing import List, Tuple, Optional
@@ -40,11 +41,71 @@ class StateManager:
         return intervals
 
     @classmethod
-    def populate_queue(cls, session: Session, cnpjs: List[str], start_date: datetime, end_date: datetime) -> int:
+    def populate_queue(cls, session: Session, cnpjs: List[str], start_date: datetime, end_date: datetime, datas_especificas: List[str] = None) -> int:
         """
         Gera os blocos de períodos de 2 dias e popula a tabela de fila (SAT_QueueProgress)
         para todos os CNPJs fornecidos. Ignora blocos que já existam exatamente na fila.
+        
+        Se datas_especificas for fornecido, cria um job para cada data específica
+        em vez de usar o intervalo de datas.
         """
+        added_count = 0
+        
+        # NOVO: Se houver datas específicas, criar um job para cada data
+        if datas_especificas and len(datas_especificas) > 0:
+            logger.info(f"[DEBUG] populate_queue com {len(datas_especificas)} datas específicas")
+            
+            for cnpj in cnpjs:
+                cnpj_clean = "".join(filter(str.isdigit, cnpj))
+                if not cnpj_clean:
+                    logger.warning(f"[DEBUG] CNPJ inválido ignorado: {cnpj}")
+                    continue
+                
+                logger.info(f"[DEBUG] Processando CNPJ: {cnpj_clean}")
+                
+                for data_str in datas_especificas:
+                    try:
+                        # Parsear a data no formato AAAA-MM-DD
+                        data = datetime.strptime(data_str, "%Y-%m-%d")
+                        data_inicio = data.replace(hour=0, minute=0, second=0, microsecond=0)
+                        data_fim = data.replace(hour=23, minute=59, second=59, microsecond=999999)
+                        
+                        # Verificar duplicidade exata
+                        exists = session.query(QueueProgress).filter(
+                            QueueProgress.cnpj == cnpj_clean,
+                            QueueProgress.periodo_inicio == data_inicio,
+                            QueueProgress.periodo_fim == data_fim
+                        ).first()
+                        
+                        if not exists:
+                            job = QueueProgress(
+                                cnpj=cnpj_clean,
+                                periodo_inicio=data_inicio,
+                                periodo_fim=data_fim,
+                                status="PENDENTE",
+                                datas_especificas=json.dumps([data_str])  # Salvar a data específica
+                            )
+                            session.add(job)
+                            added_count += 1
+                            logger.info(f"[DEBUG] Job criado para data específica: CNPJ={cnpj_clean}, Data={data_str}")
+                        else:
+                            logger.info(f"[DEBUG] Job já existe (status={exists.status}): CNPJ={cnpj_clean}, Data={data_str}")
+                            if exists.status == "CONCLUIDO":
+                                exists.status = "PENDENTE"
+                                exists.tentativas = 0
+                                exists.pagina_atual = 1
+                                exists.xmls_baixados = 0
+                                logger.info(f"[DEBUG] Job resetado para PENDENTE: ID={exists.id}")
+                                added_count += 1
+                    except ValueError as e:
+                        logger.warning(f"[DEBUG] Data inválida ignorada: {data_str} - {e}")
+                        continue
+            
+            session.commit()
+            logger.info(f"Fila populada com {added_count} novos/resetados blocos de consulta SAT (datas específicas).")
+            return added_count
+        
+        # Comportamento padrão: dividir o período em intervalos de 2 dias
         intervals = cls.split_date_range(start_date, end_date, max_days=2)
         added_count = 0
         
