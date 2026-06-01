@@ -106,7 +106,7 @@ Para empacotar a aplicação em um arquivo `.EXE` instalável autônomo (Single-
 Execute o script compilador:
 ```bash
 .\.venv\Scripts\python.exe build_exe.py
-```
+`` em a
 
 O PyInstaller efetuará a análise estrutural da base de código e gerará o executável final em:
 `dist/SAT_XML_Downloader.exe`
